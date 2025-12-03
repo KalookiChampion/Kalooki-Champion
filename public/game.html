@@ -25,222 +25,132 @@
       <div class="seat-label" id="label-right">Bot 3</div>
     </div>
 
-    <!-- Mini-hands for bots -->
-    <div id="mini-top" class="mini-hand mini-horizontal"></div>
-    <div id="mini-left" class="mini-hand mini-vertical"></div>
-    <div id="mini-right" class="mini-hand mini-vertical"></div>
-
-    <!-- Meld / set rows -->
-    <div id="set-top" class="meld-row set-row"></div>
-    <div id="set-bottom" class="meld-row set-row"></div>
-    <div id="set-left" class="meld-row set-row-v"></div>
-    <div id="set-right" class="meld-row set-row-v"></div>
-
-    <!-- Table Logo -->
-    <div id="table-logo">
-      <span class="logo-text">Ginez Kalooki</span>
-      <span class="logo-subtitle">Champion Edition</span>
-    </div>
-
-    <!-- Deck & pack piles -->
-    <div id="deckPile" class="pile">
-      <div class="pile-label">Deck</div>
-    </div>
-    <div id="packPile" class="pile">
-      <div class="pile-label">PACK</div>
-    </div>
-    <div id="packArea"></div>
-
-    <!-- Chat Box -->
-    <div id="chatBox" class="chat-box">
-      <div class="chat-header">
-        <span>Chat</span>
-        <button id="btnToggleChat" class="chat-toggle">−</button>
-      </div>
-      <div class="chat-messages" id="chatMessages"></div>
-      <div class="chat-input-row">
-        <input type="text" id="chatInput" placeholder="Type message..." maxlength="100">
-        <button id="btnSendChat">Send</button>
-      </div>
-    </div>
-
-    <!-- Controls -->
-    <div id="controls-row">
-      <div id="controls-right">
-        <div id="game-buttons">
-          <button id="btnIn">IN</button>
-          <button id="btnStart">Start</button>
+    <!-- Main table content -->
+    <div id="table-layout">
+      <!-- Top row: Bot 1 hand and set box -->
+      <div id="top-row" class="table-row">
+        <div id="bot1-hand-container" class="hand-area hand-top">
+          <div class="hand-label">Bot 1 Hand</div>
+          <div id="bot1-hand" class="hand-row hand-row-top"></div>
         </div>
-        <div id="nav-buttons">
-          <button id="btnLobby" title="Back to Lobby">🏠</button>
-          <button id="btnSettings" title="Settings">⚙️</button>
+        <div id="bot1-set-container" class="set-area set-top">
+          <div class="set-label">Bot 1 Sets</div>
+          <div id="bot1-set-box" class="set-box"></div>
         </div>
-        <button id="btnDebug" style="display:none;">Debug</button>
       </div>
 
-      <div id="playerStatus"></div>
-    </div>
-    
-    <!-- Settings Menu -->
-    <div id="settingsOverlay" class="settings-overlay hidden">
-      <div class="settings-panel">
-        <div class="settings-header">
-          <h2>Menu</h2>
-          <button id="btnCloseSettings" class="close-btn">&times;</button>
+      <!-- Middle row: Left bot, center deck/pack, right bot -->
+      <div id="middle-row" class="table-row">
+        <div id="bot2-area" class="side-area side-left">
+          <div class="side-label">Bot 2</div>
+          <div id="bot2-hand" class="hand-col"></div>
+          <div id="bot2-set-box" class="set-box-vert"></div>
         </div>
-        <div class="settings-tabs">
-          <button class="settings-tab active" data-tab="settings">Settings</button>
-          <button class="settings-tab" data-tab="leaderboard">Leaderboard</button>
-        </div>
-        <div class="settings-content" id="settingsTabContent">
-          <div class="setting-group">
-            <label>Sound Effects</label>
-            <div class="toggle-switch">
-              <input type="checkbox" id="toggleSound" checked>
-              <span class="slider"></span>
+
+        <!-- Center deck / pack / discard -->
+        <div id="center-area">
+          <div id="center-top-row">
+            <div id="turn-indicator" class="turn-indicator">
+              <div id="currentPlayerName">Waiting...</div>
             </div>
           </div>
-          <div class="setting-group">
-            <label>Sound Volume</label>
-            <input type="range" id="volumeSlider" min="0" max="100" value="60">
-            <span id="volumeValue">60%</span>
-          </div>
-          <div class="setting-group">
-            <label>Animation Speed</label>
-            <input type="range" id="animationSpeedSlider" min="25" max="200" value="100">
-            <span id="animationSpeedValue">100%</span>
-          </div>
-          <div class="setting-group">
-            <label>Table Color</label>
-            <div class="color-options">
-              <button class="color-btn active" data-color="#1a472a" style="background:#1a472a;"></button>
-              <button class="color-btn" data-color="#1a2a4a" style="background:#1a2a4a;"></button>
-              <button class="color-btn" data-color="#4a1a1a" style="background:#4a1a1a;"></button>
-              <button class="color-btn" data-color="#3d3d3d" style="background:#3d3d3d;"></button>
+          <div id="center-middle-row">
+            <div id="deck-container">
+              <div class="deck-label">DECK</div>
+              <div id="deck" class="deck-stack"></div>
+            </div>
+            <div id="pack-container">
+              <div class="deck-label">PACK</div>
+              <div id="pack" class="deck-stack"></div>
             </div>
           </div>
-          <div class="setting-group">
-            <label>Bot Difficulty</label>
-            <div class="difficulty-options">
-              <button class="difficulty-btn" data-difficulty="easy">Easy</button>
-              <button class="difficulty-btn active" data-difficulty="medium">Medium</button>
-              <button class="difficulty-btn" data-difficulty="hard">Hard</button>
-            </div>
-          </div>
-          <div class="setting-group">
-            <label>Fullscreen Mode</label>
-            <button id="btnFullscreen" class="fullscreen-btn">Enter Fullscreen</button>
+          <div id="center-bottom-row">
+            <div id="info-banner" class="info-banner">Welcome to Kalooki Champion.</div>
           </div>
         </div>
-        <div class="leaderboard-content hidden" id="leaderboardTabContent">
-          <div class="leaderboard-mode-tabs">
-            <button class="leaderboard-mode-tab active" data-mode="solo">Solo (vs Bots)</button>
-            <button class="leaderboard-mode-tab" data-mode="multiplayer">Multiplayer</button>
-          </div>
-          
-          <!-- Solo Mode Stats -->
-          <div class="leaderboard-mode-content" id="soloLeaderboardContent">
-            <div class="player-stats-section">
-              <h3>Your Solo Stats</h3>
-              <div class="player-stats-card">
-                <div class="player-avatar">🤖</div>
-                <div class="player-info">
-                  <div class="player-name" id="soloStatsPlayerName">Player</div>
-                  <div class="player-rating" id="soloStatsPlayerRating">Rating: 1000</div>
-                </div>
-              </div>
-              <div class="stats-grid">
-                <div class="stat-item">
-                  <span class="stat-value" id="soloStatsGamesPlayed">0</span>
-                  <span class="stat-label">Games Played</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-value" id="soloStatsGamesWon">0</span>
-                  <span class="stat-label">Games Won</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-value" id="soloStatsWinRate">0%</span>
-                  <span class="stat-label">Win Rate</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-value" id="soloStatsCurrentStreak">0</span>
-                  <span class="stat-label">Win Streak</span>
-                </div>
-              </div>
-            </div>
-            <div class="leaderboard-section">
-              <h3>Top Solo Players</h3>
-              <div class="leaderboard-list" id="soloLeaderboardList">
-                <div class="leaderboard-empty">No solo games played yet</div>
-              </div>
-            </div>
-          </div>
-          
-          <!-- Multiplayer Stats -->
-          <div class="leaderboard-mode-content hidden" id="multiplayerLeaderboardContent">
-            <div class="player-stats-section">
-              <h3>Your Multiplayer Stats</h3>
-              <div class="player-stats-card">
-                <div class="player-avatar">👥</div>
-                <div class="player-info">
-                  <div class="player-name" id="mpStatsPlayerName">Player</div>
-                  <div class="player-rating" id="mpStatsPlayerRating">Rating: 1000</div>
-                </div>
-              </div>
-              <div class="stats-grid">
-                <div class="stat-item">
-                  <span class="stat-value" id="mpStatsGamesPlayed">0</span>
-                  <span class="stat-label">Games Played</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-value" id="mpStatsGamesWon">0</span>
-                  <span class="stat-label">Games Won</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-value" id="mpStatsWinRate">0%</span>
-                  <span class="stat-label">Win Rate</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-value" id="mpStatsCurrentStreak">0</span>
-                  <span class="stat-label">Win Streak</span>
-                </div>
-              </div>
-            </div>
-            <div class="leaderboard-section">
-              <h3>Top Multiplayer Players</h3>
-              <div class="leaderboard-list" id="mpLeaderboardList">
-                <div class="leaderboard-empty">No multiplayer games played yet</div>
-              </div>
-            </div>
-          </div>
-          
-          <div class="stats-actions">
-            <button id="btnResetStats" class="reset-stats-btn">Reset Statistics</button>
-          </div>
+
+        <div id="bot3-area" class="side-area side-right">
+          <div class="side-label">Bot 3</div>
+          <div id="bot3-hand" class="hand-col"></div>
+          <div id="bot3-set-box" class="set-box-vert"></div>
+        </div>
+      </div>
+
+      <!-- Bottom row: Player 1 hand and set box -->
+      <div id="bottom-row" class="table-row">
+        <div id="player1-set-container" class="set-area set-bottom">
+          <div class="set-label">Player 1 Sets</div>
+          <div id="player1-set-box" class="set-box"></div>
+        </div>
+        <div id="player1-hand-container" class="hand-area hand-bottom">
+          <div class="hand-label">Your Hand</div>
+          <div id="player1-hand" class="hand-row hand-row-bottom"></div>
         </div>
       </div>
     </div>
 
-    <!-- Player 1 hand -->
-    <div id="hand-bottom" class="hand-row"></div>
-
-    <!-- Elimination notification overlay -->
-    <div id="eliminationOverlay" class="elimination-overlay hidden">
-      <div class="elimination-content">
-        <div class="elimination-header">ELIMINATED!</div>
-        <div id="eliminationPlayerName" class="elimination-player"></div>
-        <div class="elimination-reason-title">Invalid Meld Detected:</div>
-        <div id="eliminationDetails" class="elimination-details"></div>
-        <div class="elimination-footer">Hand cards sent to bottom of discard pile</div>
+    <!-- Control panel -->
+    <div id="control-panel">
+      <div id="left-controls">
+        <button id="startGameBtn" class="btn primary">Start Game</button>
+        <button id="debugToggleBtn" class="btn secondary">Debug: OFF</button>
+      </div>
+      <div id="right-controls">
+        <button id="endTurnBtn" class="btn primary" disabled>End Turn</button>
+        <button id="sortHandBtn" class="btn secondary">Sort Hand</button>
       </div>
     </div>
 
-    <!-- Victory celebration overlay -->
-    <div id="victoryOverlay" class="victory-overlay hidden">
-      <div class="confetti-container" id="confettiContainer"></div>
-      <div class="victory-content">
-        <div class="victory-trophy">&#127942;</div>
-        <div id="victoryPlayerName" class="victory-player"></div>
+    <!-- Settings panel -->
+    <div id="settings-panel" class="settings-panel hidden">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button id="settingsCloseBtn" class="btn small">X</button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-row">
+          <label for="volumeSlider">Sound Volume:</label>
+          <input type="range" id="volumeSlider" min="0" max="100" value="60">
+          <span id="volumeValue">60%</span>
+        </div>
+        <div class="settings-row">
+          <label>
+            <input type="checkbox" id="toggleAnimations" checked>
+            Enable animations
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Meld prompt dialog -->
+    <div id="meldPromptOverlay" class="overlay hidden">
+      <div class="meld-dialog">
+        <h2>Confirm First Meld</h2>
+        <p>Your current sets total <span id="meldTotal">0</span> points. You need at least 40 to come down.</p>
+        <div class="meld-actions">
+          <button id="confirmMeldBtn" class="btn primary">Confirm</button>
+          <button id="cancelMeldBtn" class="btn secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Joker representation prompt -->
+    <div id="jokerPromptOverlay" class="overlay hidden">
+      <div class="joker-dialog">
+        <h2>Choose Joker Representation</h2>
+        <p>Select the <span id="jokerPromptContext"></span> the Joker will represent.</p>
+        <div id="jokerRepOptions" class="joker-options"></div>
+        <div class="joker-actions">
+          <button id="jokerConfirmBtn" class="btn primary">Confirm</button>
+          <button id="jokerCancelBtn" class="btn secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Victory overlay -->
+    <div id="victoryOverlay" class="overlay hidden">
+      <div class="victory-dialog">
+        <div id="victoryPlayerName" class="victory-title">Player 1</div>
         <div class="victory-header">WINS!</div>
         <div class="victory-stars">&#11088; &#11088; &#11088; &#11088; &#11088;</div>
         <div id="victoryMessage" class="victory-message">Congratulations on your victory!</div>
@@ -254,5 +164,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <!-- Main table logic (relative path) -->
   <script src="js/kaloki-table.js"></script>
+  <!-- Preload card images to smooth animations -->
+  <script src="js/preload-cards.js"></script>
 </body>
 </html>
