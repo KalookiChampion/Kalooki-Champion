@@ -25,7 +25,7 @@
       <div class="seat-label" id="label-right">Bot 3</div>
     </div>
 
-    <!-- Main table content -->
+    <!-- ================== MAIN TABLE ================== -->
     <div id="table-layout">
       <!-- Top row: Bot 1 hand and set box -->
       <div id="top-row" class="table-row">
@@ -41,13 +41,14 @@
 
       <!-- Middle row: Left bot, center deck/pack, right bot -->
       <div id="middle-row" class="table-row">
+        <!-- Bot 2 (left) -->
         <div id="bot2-area" class="side-area side-left">
           <div class="side-label">Bot 2</div>
           <div id="bot2-hand" class="hand-col"></div>
           <div id="bot2-set-box" class="set-box-vert"></div>
         </div>
 
-        <!-- Center deck / pack / discard -->
+        <!-- Center area: deck, pack, info -->
         <div id="center-area">
           <div id="center-top-row">
             <div id="turn-indicator" class="turn-indicator">
@@ -69,6 +70,7 @@
           </div>
         </div>
 
+        <!-- Bot 3 (right) -->
         <div id="bot3-area" class="side-area side-right">
           <div class="side-label">Bot 3</div>
           <div id="bot3-hand" class="hand-col"></div>
@@ -89,7 +91,7 @@
       </div>
     </div>
 
-    <!-- Control panel -->
+    <!-- ================== CONTROL PANEL ================== -->
     <div id="control-panel">
       <div id="left-controls">
         <button id="startGameBtn" class="btn primary">Start Game</button>
@@ -101,23 +103,74 @@
       </div>
     </div>
 
-    <!-- Settings panel -->
-    <div id="settings-panel" class="settings-panel hidden">
-      <div class="settings-header">
-        <h2>Settings</h2>
-        <button id="settingsCloseBtn" class="btn small">X</button>
+    <!-- ================== STATUS BAR ================== -->
+    <div id="status-bar">
+      <div id="status-left">
+        <span id="status-text">Waiting to start...</span>
       </div>
-      <div class="settings-body">
-        <div class="settings-row">
-          <label for="volumeSlider">Sound Volume:</label>
-          <input type="range" id="volumeSlider" min="0" max="100" value="60">
-          <span id="volumeValue">60%</span>
+      <div id="status-right">
+        <span id="deckCountLabel">Deck:</span>
+        <span id="deckCountValue">0</span>
+        <span id="packCountLabel">Pack:</span>
+        <span id="packCountValue">0</span>
+      </div>
+    </div>
+
+    <!-- ================== MINI-HANDS (OVERVIEW) ================== -->
+    <div id="mini-hands-row">
+      <div id="mini-top" class="mini-hand mini-horizontal"></div>
+      <div id="mini-left" class="mini-hand mini-vertical"></div>
+      <div id="mini-right" class="mini-hand mini-vertical"></div>
+      <div id="mini-bottom" class="mini-hand mini-horizontal"></div>
+    </div>
+
+    <!-- ================== CHAT & MENU ================== -->
+    <div id="table-sidebar">
+      <div id="chat-panel">
+        <div id="chat-header">
+          <span>Table Chat</span>
+          <button id="btnCloseChat">✖</button>
         </div>
-        <div class="settings-row">
-          <label>
-            <input type="checkbox" id="toggleAnimations" checked>
-            Enable animations
-          </label>
+        <div id="chat-messages"></div>
+        <div id="chat-input-row">
+          <input type="text" id="chatInput" placeholder="Type message..." maxlength="100">
+          <button id="btnSendChat">Send</button>
+        </div>
+      </div>
+
+      <div id="menu-panel">
+        <div id="menu-buttons">
+          <button id="btnLobby" title="Back to Lobby">🏠</button>
+          <button id="btnSettings" title="Settings">⚙️</button>
+        </div>
+        <button id="btnDebug" style="display:none;">Debug</button>
+      </div>
+
+      <div id="playerStatus"></div>
+    </div>
+    
+    <!-- Settings Menu -->
+    <div id="settingsOverlay" class="settings-overlay hidden">
+      <div class="settings-panel">
+        <div class="settings-header">
+          <h2>Menu</h2>
+          <button id="btnCloseSettings" class="close-btn">&times;</button>
+        </div>
+        <div class="settings-body">
+          <div class="settings-row">
+            <label for="volumeSlider">Sound Volume:</label>
+            <input type="range" id="volumeSlider" min="0" max="100" value="60">
+            <span id="volumeValue">60%</span>
+          </div>
+          <div class="settings-row">
+            <label>
+              <input type="checkbox" id="toggleAnimations" checked>
+              Enable animations
+            </label>
+          </div>
+          <div class="settings-row">
+            <button id="btnCloseGame" class="danger">Leave Table</button>
+          </div>
         </div>
       </div>
     </div>
@@ -164,7 +217,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <!-- Main table logic (relative path) -->
   <script src="js/kaloki-table.js"></script>
-  <!-- Preload card images to smooth animations -->
+  <!-- Preload card images to smooth multiplayer animations -->
   <script src="js/preload-cards.js"></script>
 </body>
 </html>
