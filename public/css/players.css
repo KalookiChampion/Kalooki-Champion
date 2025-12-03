@@ -1,0 +1,11 @@
+/* KALOKI player visuals
+   Table layout, seat positions, mini-hands, etc. all live in table.css.
+   This file is reserved for future per-player styling only. */
+
+.player-active {
+  outline: 3px solid #ffd700; /* highlight current player, if JS adds class */
+}
+
+.player-muted {
+  opacity: 0.6;               /* e.g. for disconnected / waiting players    */
+}
