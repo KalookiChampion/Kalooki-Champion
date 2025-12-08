@@ -4270,12 +4270,15 @@ function stageJokerSwap(naturalCard, jokerCard, targetSeat, groupId) {
   naturalCard.laidTurn = gameState.currentTurnId || 0;
   seatSets[jokerIndex] = naturalCard;
 
-  // Move joker back to player's hand (free – no special group, no lock)
+  // Move Joker to the bottom player's SET BOX in a new group
+  const playerSets = gameState.sets.bottom;
+  const newGroupId = nextGroupId();
+
   jokerCard.jokerRepRank = null;
   jokerCard.jokerRepSuit = null;
-  jokerCard.groupId = null;
+  jokerCard.groupId = newGroupId;
   jokerCard.laidTurn = gameState.currentTurnId || 0;
-  gameState.hands.bottom.push(jokerCard);
+  playerSets.push(jokerCard);
 
   // Re-sort and re-assign joker reps in the target meld
   autoSortGroupIfComplete(seatSets, actualGroupId);
@@ -5336,8 +5339,13 @@ function handleSetZonePointerDrop(seat, clientX, clientY, card) {
               }
 
               // Joker swap is only valid when going out to WIN
-              // (hand-size restriction temporarily disabled for movement testing)
-// Remove the natural card from hand
+              // Hand must have at most 2 cards: the natural card for swap + (optionally) the discard
+              if (hand.length > 2) {
+                setStatus('Joker swap only allowed when going out to WIN! You have too many cards.');
+                return true;
+              }
+
+              // Remove the natural card from hand
               hand.splice(idx, 1);
 
               // Stage the swap: natural card into meld, Joker to your HAND (no locked group)
@@ -5348,7 +5356,7 @@ function handleSetZonePointerDrop(seat, clientX, clientY, card) {
                 return true;
               }
 
-              setStatus('Joker swapped to your hand. You must go OUT this turn or the swap will be rolled back.');
+              setStatus('Joker swapped to your set box. You must go OUT this turn or the swap will be rolled back.');
               playSound('draw');
 
               renderBottomHand();
@@ -5807,14 +5815,19 @@ function setupSetZoneDragAndDrop() {
                 }
                 
                 // Joker swap is only valid when going out to WIN
-                // (hand-size restriction temporarily disabled for movement testing)
-// This is a Joker swap attempt!
+                // Hand must have exactly 2 cards: the natural card for swap + the discard
+                if (hand.length > 2) {
+                  setStatus('Joker swap only allowed when going out to WIN! You have too many cards.');
+                  return;
+                }
+                
+                // This is a Joker swap attempt!
                 // Remove card from hand first
                 hand.splice(idx, 1);
                 
                 // Stage the swap
                 if (stageJokerSwap(card, actualJoker, seat, targetCard.groupId)) {
-                  setStatus('Joker swap staged! Discard the Joker to WIN, or your swap will be rolled back.');
+                  setStatus('Joker swap staged to your set box. You must go OUT this turn or the swap will be rolled back.');
                   playSound('draw');
                   
                   renderBottomHand();
