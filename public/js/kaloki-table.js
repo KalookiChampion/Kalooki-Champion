@@ -1892,7 +1892,7 @@ let gameState = {
     right: false
   },
 
-  // Track which meld groups are invalid (locked, glowing red)
+  // Track which meld groups are invalid when a player is eliminated
   invalidMelds: {
     bottom: [],
     top: [],
@@ -2836,16 +2836,13 @@ function setupHandContainerDragHandlers(handEl) {
   });
 }
 
-function createSetCardElement(card, seat, isLocked = false) {
+function createSetCardElement(card, seat) {
   const img = document.createElement('img');
   img.classList.add('card', 'set-card', 'meld-card');
   img.src = `/cards/${card.imageKey}.png`;
   img.draggable = false;
   img.dataset.cardId = card.id;
   img.dataset.seat = seat;
-  if (isLocked) {
-    img.dataset.locked = 'true';
-  }
   
   // Add yellow glow for goers played this turn
   if (card.isGoer && gameState.goersThisTurn.includes(card.id)) {
@@ -3709,40 +3706,79 @@ function animateEliminationCards(cards, seat, onComplete) {
 }
 
 // Build all valid 3–5 card meld candidates in a hand.
-function chooseOpeningMeldsForSeat(seat) {
+function chooseOpeningMeldsForSeat(seat, options = {}) {
   const hand = gameState.hands[seat] || [];
-  if (hand.length < 3) return [];
+  if (!hand || hand.length < 3) return [];
 
-  const candidates = [];
+  const opts = options || {};
+  const requiredCardId = opts.requiredCardId || null;
+
   const n = hand.length;
+  const candidates = [];
+  const packCandidates = [];
 
+  // Enumerate all subsets of the hand and keep only valid melds (size >= 3)
   for (let mask = 0; mask < (1 << n); mask++) {
-    const bits = mask.toString(2).split('1').length - 1;
+    // Quick bit-count; skip small subsets
+    let bits = 0;
+    for (let i = 0; i < n; i++) {
+      if (mask & (1 << i)) bits++;
+    }
     if (bits < 3) continue;
 
     const group = [];
+    let containsRequired = !requiredCardId;
+
     for (let i = 0; i < n; i++) {
       if (mask & (1 << i)) {
-        group.push(hand[i]);
+        const card = hand[i];
+        group.push(card);
+        if (requiredCardId && card.id === requiredCardId) {
+          containsRequired = true;
+        }
       }
     }
+
+    if (!group.length) continue;
 
     const setOk = isValidSetGroup(group);
     const runOk = !setOk && isValidRunGroup(group);
     if (!setOk && !runOk) continue;
 
     const score = scoreMeldGroup(group);
-    if (score <= 0) continue;
+    if (!score || score <= 0) continue;
 
-    candidates.push({ mask, group, score });
+    const cand = { mask, group, score };
+    candidates.push(cand);
+
+    if (requiredCardId && containsRequired) {
+      packCandidates.push(cand);
+    }
   }
 
   if (!candidates.length) return [];
 
+  // Sort highest score first
   candidates.sort((a, b) => b.score - a.score);
+
   const chosen = [];
   let usedMask = 0;
 
+  // If we must use a specific card (eg, PACK card), force the best meld
+  // containing that card to be chosen first.
+  if (requiredCardId) {
+    if (!packCandidates.length) {
+      // No meld uses the required card – caller will decide how to handle this.
+      return [];
+    }
+    // Pick the highest-scoring candidate that includes the required card
+    packCandidates.sort((a, b) => b.score - a.score);
+    const first = packCandidates[0];
+    chosen.push(first);
+    usedMask |= first.mask;
+  }
+
+  // Then greedily add the best non-overlapping melds
   for (const cand of candidates) {
     if ((usedMask & cand.mask) !== 0) continue;
     chosen.push(cand);
@@ -3760,6 +3796,10 @@ function botAddGoersForSeat(seat) {
   if (!hand || !hand.length) return;
   if (!gameState.opened[seat]) return;   // no goers until 40+ is down
 
+  // If this seat just drew from PACK, we must NOT allow that PACK card
+  // to be used as a goer to extend existing melds this turn.
+  const packCardIdThisTurn = (gameState.lastDrawSource === 'pack') ? gameState.lastPackCardId : null;
+
   // Get all seats to check for goer opportunities
   const allSeats = ['bottom', 'top', 'left', 'right'];
   // Prioritize own sets first, then others
@@ -3772,6 +3812,12 @@ function botAddGoersForSeat(seat) {
     // Iterate through hand (use index to handle splice safely)
     for (let hi = 0; hi < hand.length; hi++) {
       const card = hand[hi];
+
+      // PACK rule: the PACK card taken this turn may NOT be used as a goer
+      // to extend existing melds. It can only ever appear in brand-new melds.
+      if (packCardIdThisTurn && card.id === packCardIdThisTurn) {
+        continue;
+      }
       let placed = false;
       
       for (const targetSeat of orderedSeats) {
@@ -3780,17 +3826,11 @@ function botAddGoersForSeat(seat) {
         const targetSets = gameState.sets[targetSeat];
         if (!targetSets || !targetSets.length) continue;
         
-        // Get invalid melds for THIS target seat (fresh lookup each time)
-        const invalidIndices = (gameState.invalidMelds && gameState.invalidMelds[targetSeat]) || [];
-        
         // Build fresh grouped data for this target seat
         const groups = groupMeldCards(targetSets);
 
         for (let gi = 0; gi < groups.length; gi++) {
           if (placed) break;
-          
-          // Skip locked/invalid meld groups - cannot play on them
-          if (invalidIndices.includes(gi)) continue;
           
           const g = groups[gi];
           if (!g.length) continue;
@@ -4189,94 +4229,63 @@ function isValidJokerSwapAttempt(naturalCard, jokerCard, targetSeat) {
 
 // Stage a Joker swap - put natural card in meld, Joker goes to player's hand
 // This is STAGED and only validated when player tries to win
+// Stage a Joker swap - put natural card in meld, Joker goes to player's hand
+// This is STAGED and only validated when player tries to win
 function stageJokerSwap(naturalCard, jokerCard, targetSeat, groupId) {
   const seatSets = gameState.sets[targetSeat];
   if (!seatSets) return false;
-  
+
   // Find the joker in the meld
   const jokerIndex = seatSets.findIndex(c => c.id === jokerCard.id);
   if (jokerIndex === -1) return false;
-  
+
   // Get the joker's actual groupId from the array (more reliable than passed parameter)
   const actualGroupId = seatSets[jokerIndex].groupId || groupId;
   if (!actualGroupId) {
     console.error('No groupId found for joker swap');
     return false;
   }
-  
-  // Create snapshot if this is the first swap this turn
+
+  // First joker swap in this OUT attempt: take a snapshot
   if (!gameState.winAttemptSnapshot) {
     gameState.winAttemptSnapshot = createGameStateSnapshot();
+    gameState.stagedJokerSwaps = [];
   }
-  
-  // Record the swap for potential rollback
+
+  // Record the swap for possible rollback (we only really need ids here)
   gameState.stagedJokerSwaps.push({
-    jokerCard: { ...jokerCard },
-    naturalCard: { ...naturalCard },
-    targetSeat: targetSeat,
+    jokerCardId: jokerCard.id,
+    naturalCardId: naturalCard.id,
+    targetSeat,
     groupId: actualGroupId,
-    jokerIndex: jokerIndex
+    jokerIndex
   });
-  
-  // Mark both cards as part of a joker swap (for orange glow effect)
+
+  // Mark both cards as part of a joker swap (orange glow)
   naturalCard.isJokerSwapCard = true;
   jokerCard.isJokerSwapCard = true;
-  
+
   // Put natural card into the meld at the joker's position with the SAME groupId
   naturalCard.groupId = actualGroupId;
+  naturalCard.laidTurn = gameState.currentTurnId || 0;
   seatSets[jokerIndex] = naturalCard;
-  
-  // Move joker back to player's hand
+
+  // Move joker back to player's hand (free – no special group, no lock)
   jokerCard.jokerRepRank = null;
   jokerCard.jokerRepSuit = null;
   jokerCard.groupId = null;
+  jokerCard.laidTurn = gameState.currentTurnId || 0;
   gameState.hands.bottom.push(jokerCard);
-  
-  // Re-sort the group to ensure proper card ordering
+
+  // Re-sort and re-assign joker reps in the target meld
   autoSortGroupIfComplete(seatSets, actualGroupId);
-  
-  // Verify all cards in the group have the correct groupId
-  const groupCards = seatSets.filter(c => c.groupId === actualGroupId);
-  if (groupCards.length > 0) {
-    // Ensure the natural card is properly positioned within the group
-    // Find where the group starts and ends in seatSets
-    const groupIndices = [];
-    for (let i = 0; i < seatSets.length; i++) {
-      if (seatSets[i].groupId === actualGroupId) {
-        groupIndices.push(i);
-      }
-    }
-    
-    // Check if indices are contiguous (they should be)
-    if (groupIndices.length > 1) {
-      const isContiguous = groupIndices.every((idx, i) => 
-        i === 0 || idx === groupIndices[i - 1] + 1
-      );
-      
-      if (!isContiguous) {
-        // Need to reorder seatSets to make the group contiguous
-        const cardsInGroup = groupCards.slice();
-        const cardsNotInGroup = seatSets.filter(c => c.groupId !== actualGroupId);
-        
-        // Find the first occurrence of this group and insert all group cards there
-        const firstGroupIndex = groupIndices[0];
-        
-        // Rebuild the array: cards before group, all group cards together, cards after
-        const beforeGroup = cardsNotInGroup.filter((_, i) => {
-          const origIdx = seatSets.indexOf(cardsNotInGroup[i]);
-          return origIdx < firstGroupIndex;
-        });
-        const afterGroup = cardsNotInGroup.filter(c => !beforeGroup.includes(c));
-        
-        // Clear and rebuild seatSets
-        seatSets.length = 0;
-        seatSets.push(...beforeGroup, ...cardsInGroup, ...afterGroup);
-      }
-    }
-  }
-  
+  assignAllJokerRepresentationsInGroup(seatSets, actualGroupId);
+
   return true;
 }
+
+
+
 
 // Create a snapshot of the game state for rollback
 function createGameStateSnapshot() {
@@ -4419,7 +4428,6 @@ function renderSeatSetRow(seat, elementId) {
 
   const cards = gameState.sets[seat] || [];
   const groups = groupMeldCards(cards);
-  const invalidIndices = (gameState.invalidMelds && gameState.invalidMelds[seat]) || [];
 
   // Separate pending Joker group from regular melds (for bottom seat)
   let pendingJokerGroupData = null;
@@ -4444,15 +4452,8 @@ function renderSeatSetRow(seat, elementId) {
       groupEl.classList.add('set-group-vert');
     }
     
-    // Check if this group is marked as invalid
-    const isInvalid = invalidIndices.includes(groupIndex);
-    if (isInvalid) {
-      groupEl.classList.add('invalid-meld');
-      groupEl.dataset.locked = 'true';
-    }
-
     group.forEach((card, index) => {
-      const cardEl = createSetCardElement(card, seat, isInvalid);
+      const cardEl = createSetCardElement(card, seat);
       if (index === 0) {
         cardEl.classList.add('set-card-first');
       }
@@ -4491,7 +4492,7 @@ function renderSeatSetRow(seat, elementId) {
     });
 
     pendingJokerGroupData.forEach((card, index) => {
-      const cardEl = createSetCardElement(card, seat, false);
+      const cardEl = createSetCardElement(card, seat);
       if (index === 0) {
         cardEl.classList.add('set-card-first');
       }
@@ -4546,10 +4547,10 @@ const packCardPositions = new Map();
 
 function getRandomPackPosition(cardId) {
   if (!packCardPositions.has(cardId)) {
-    // Random position within the pack area - more spread out
-    const x = Math.random() * 80 - 10;   // -10 to 70 px (wider spread)
-    const y = Math.random() * 60 - 5;    // -5 to 55 px (taller spread)
-    const rotation = (Math.random() - 0.5) * 50; // -25 to +25 degrees (more rotation)
+    // Random position within the pack area - much more spread out, any angle
+    const x = Math.random() * 140 - 70;   // -70 to +70 px (wider scatter)
+    const y = Math.random() * 120 - 60;   // -60 to +60 px (taller scatter)
+    const rotation = Math.random() * 360; // 0–360 degrees, fully random orientation
     packCardPositions.set(cardId, { x, y, rotation });
   }
   return packCardPositions.get(cardId);
@@ -5269,13 +5270,9 @@ function handleSetZonePointerDrop(seat, clientX, clientY, card) {
     }
   }
   
-  // Check if dropping on a locked (invalid) set group
+  // Check drop target position for set zone interactions
   const elemAtPoint = document.elementFromPoint(clientX, clientY);
   const targetGroup = elemAtPoint ? elemAtPoint.closest('.meld-group') : null;
-  if (targetGroup && targetGroup.classList.contains('invalid-meld')) {
-    setStatus('Cannot play cards on invalid sets! This set is locked.');
-    return true; // Handled (rejected)
-  }
   
   const hand = gameState.hands.bottom;
   const idx = hand.findIndex(c => c.id === card.id);
@@ -5337,38 +5334,36 @@ function handleSetZonePointerDrop(seat, clientX, clientY, card) {
                 console.error('Invalid joker card in swap:', matchingJoker);
                 return true;
               }
-              
-              // Can only have one pending Joker swap at a time
-              if (gameState.pendingJokerSwap) {
-                setStatus('You already have a pending Joker swap. Double-click it to undo first.');
-                return true;
-              }
-              
-              // Remove card from hand first
+
+              // Joker swap is only valid when going out to WIN
+              // (hand-size restriction temporarily disabled for movement testing)
+// Remove the natural card from hand
               hand.splice(idx, 1);
-              
-              // Perform the swap (natural card goes into meld, Joker goes to YOUR set box)
-              if (performJokerSwap(card, matchingJoker, seat, targetCard.groupId)) {
-                setStatus('Joker swapped! Add cards to form a meld, or double-click to undo.');
-                playSound('draw');
-                
-                renderBottomHand();
-                renderBottomSetRow();
-                if (seat === 'top') {
-                  renderTopSetRow();
-                } else if (seat === 'left') {
-                  renderLeftSetRow();
-                } else if (seat === 'right') {
-                  renderRightSetRow();
-                }
-                renderMiniHands();
-                return true;
-              } else {
+
+              // Stage the swap: natural card into meld, Joker to your HAND (no locked group)
+              if (!stageJokerSwap(card, matchingJoker, seat, targetCard.groupId)) {
+                // Put card back if anything goes wrong
                 hand.splice(idx, 0, card);
                 setStatus('Joker swap failed.');
                 return true;
               }
+
+              setStatus('Joker swapped to your hand. You must go OUT this turn or the swap will be rolled back.');
+              playSound('draw');
+
+              renderBottomHand();
+              renderBottomSetRow();
+              if (seat === 'top') {
+                renderTopSetRow();
+              } else if (seat === 'left') {
+                renderLeftSetRow();
+              } else if (seat === 'right') {
+                renderRightSetRow();
+              }
+              renderMiniHands();
+              return true;
             }
+
           }
         }
       }
@@ -5750,12 +5745,6 @@ function setupSetZoneDragAndDrop() {
 
       e.preventDefault();
       
-      // Check if dropping on a locked (invalid) set group
-      const targetGroup = e.target.closest('.meld-group');
-      if (targetGroup && targetGroup.classList.contains('invalid-meld')) {
-        setStatus('Cannot play cards on invalid sets! This set is locked.');
-        return;
-      }
       
       const cardId = e.dataTransfer.getData('text/plain') || gameState.draggingCardId;
       if (!cardId) return;
@@ -5818,13 +5807,8 @@ function setupSetZoneDragAndDrop() {
                 }
                 
                 // Joker swap is only valid when going out to WIN
-                // Hand must have exactly 2 cards: the natural card for swap + the discard
-                if (hand.length > 2) {
-                  setStatus('Joker swap only allowed when going out to WIN! You have too many cards.');
-                  return;
-                }
-                
-                // This is a Joker swap attempt!
+                // (hand-size restriction temporarily disabled for movement testing)
+// This is a Joker swap attempt!
                 // Remove card from hand first
                 hand.splice(idx, 1);
                 
@@ -6357,7 +6341,7 @@ function botShouldDrawFromPack(seat) {
 
   const topCard = pack[pack.length - 1];
 
-  // Can't take own discard from deck
+  // Can't immediately take back your own discard after drawing from the DECK
   if (
     gameState.lastDiscardSeat === seat &&
     gameState.lastDiscardSource === 'deck' &&
@@ -6366,69 +6350,34 @@ function botShouldDrawFromPack(seat) {
     return false;
   }
 
-  // Don't draw unassigned jokers from pack
-  if (topCard.rank === 'JOKER' && !topCard.jokerRepRank) {
+  // Temporarily simulate having taken the PACK card into this hand
+  const originalHand = hand;
+  const tempHand = hand.slice();
+  tempHand.push(topCard);
+
+  // Swap in the simulated hand so we can reuse the meld chooser logic
+  gameState.hands[seat] = tempHand;
+  const chosen = chooseOpeningMeldsForSeat(seat, { requiredCardId: topCard.id }) || [];
+  // Restore the real hand
+  gameState.hands[seat] = originalHand;
+
+  if (!chosen.length) {
+    // No new meld is possible that uses the PACK card – drawing from PACK would be illegal
     return false;
   }
 
-  // Find all valid 3-card melds that include the pack card
-  const validMeldsWithPackCard = [];
-  for (let i = 0; i < hand.length; i++) {
-    for (let j = i + 1; j < hand.length; j++) {
-      const candidate = [topCard, hand[i], hand[j]];
-      if (isValidSetGroup(candidate) || isValidRunGroup(candidate)) {
-        // Calculate meld score
-        let meldScore = 0;
-        candidate.forEach(c => {
-          if (c.rank === 'JOKER') meldScore += 25;
-          else if (c.rank === 'A') meldScore += 15;
-          else if (['K', 'Q', 'J', '10'].includes(c.rank)) meldScore += 10;
-          else meldScore += parseInt(c.rank) || 0;
-        });
-        validMeldsWithPackCard.push({ cards: candidate, score: meldScore });
-      }
-    }
-  }
-
-  if (validMeldsWithPackCard.length === 0) {
-    return false;
-  }
-
-  // If bot is already opened, they can take from pack (they'll meld it)
   if (gameState.opened[seat]) {
+    // Already opened: as long as we can create a brand-new meld that uses the PACK card,
+    // it is legal (and usually beneficial) to draw from PACK.
     return true;
   }
 
-  // Bot not opened yet - check if drawing from pack would help reach 40 points
-  // Calculate best possible opening score including this meld
-  const tempHand = [...hand, topCard];
-  
-  // Find best combination of melds that could reach 40 points
-  let bestOpeningScore = 0;
-  const allPossibleMelds = findAllPossibleMelds(tempHand);
-  
-  // Must include a meld with the pack card (game rule)
-  for (const packMeld of validMeldsWithPackCard) {
-    const packMeldIds = new Set(packMeld.cards.map(c => c.id));
-    
-    // Find other melds that don't overlap with pack meld
-    let totalScore = packMeld.score;
-    const usedIds = new Set(packMeldIds);
-    
-    for (const otherMeld of allPossibleMelds) {
-      const overlapWithUsed = otherMeld.cards.some(c => usedIds.has(c.id));
-      if (!overlapWithUsed) {
-        totalScore += otherMeld.score;
-        otherMeld.cards.forEach(c => usedIds.add(c.id));
-      }
-    }
-    
-    bestOpeningScore = Math.max(bestOpeningScore, totalScore);
-  }
+  // Not opened yet: only draw from PACK if we can actually OPEN (40+) this turn
+  const openingScore = chosen.reduce((sum, cand) => sum + (cand.score || 0), 0);
 
-  // Only draw from pack if it helps reach 40 points
-  return bestOpeningScore >= 40;
+  return openingScore >= 40;
 }
+
 
 // Helper to find all possible 3-card melds in a hand
 function findAllPossibleMelds(hand) {
@@ -6525,7 +6474,11 @@ function runSingleBotTurn(seat) {
 function botProcessAndDiscard(seat, drawSource) {
   const hand = gameState.hands[seat];
   
-  const chosen = chooseOpeningMeldsForSeat(seat);
+  const requiredCardId = (drawSource === 'pack') ? gameState.lastPackCardId : null;
+
+  const chosen = chooseOpeningMeldsForSeat(seat, {
+    requiredCardId: requiredCardId
+  });
 
   if (!gameState.opened[seat]) {
     let openingScore = 0;
