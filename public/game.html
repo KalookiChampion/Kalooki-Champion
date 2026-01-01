@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KALOOKI CHAMPION - Table</title>
+  <link rel="icon" type="image/png" href="cards-jamaican/105_JOKER.png">
+
+  <!-- MAIN TABLE LAYOUT CSS (relative paths from /public) -->
+  <link rel="stylesheet" href="css/table.css">
+</head>
+<body>
+  <div id="table-root">
+    <!-- Seat labels -->
+    <div id="seat-top" class="seat-area">
+      <div class="seat-label" id="label-top">Bot 1</div>
+    </div>
+    <div id="seat-bottom" class="seat-area">
+      <div class="seat-label" id="label-bottom">YOU</div>
+    </div>
+    <div id="seat-left" class="seat-area">
+      <div class="seat-label" id="label-left">Bot 2</div>
+    </div>
+    <div id="seat-right" class="seat-area">
+      <div class="seat-label" id="label-right">Bot 3</div>
+    </div>
+
+    <!-- Mini-hands for bots -->
+    <div id="mini-top" class="mini-hand mini-horizontal"></div>
+    <div id="mini-left" class="mini-hand mini-vertical"></div>
+    <div id="mini-right" class="mini-hand mini-vertical"></div>
+
+    <!-- Meld / set rows -->
+    <div id="set-top" class="meld-row set-row"></div>
+    <div id="set-bottom" class="meld-row set-row"></div>
+    <div id="set-left" class="meld-row set-row-v"></div>
+    <div id="set-right" class="meld-row set-row-v"></div>
+
+    <!-- Table Logo -->
+    <div id="table-logo">
+      <span class="logo-text">Ginez Kalooki</span>
+      <span class="logo-subtitle">Champion Edition</span>
+    </div>
+
+    <!-- Deck & pack piles -->
+    <div id="deckPile" class="pile">
+      <div class="pile-label">Deck</div>
+    </div>
+    <div id="packPile" class="pile">
+      <div class="pile-label">PACK</div>
+    </div>
+    <div id="packArea"></div>
+
+    <!-- Chat Box -->
+    <div id="chatBox" class="chat-box">
+      <div class="chat-header">
+        <span>Chat</span>
+        <button id="btnToggleChat" class="chat-toggle">−</button>
+      </div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chatInput" placeholder="Type message..." maxlength="100">
+        <button id="btnSendChat">Send</button>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div id="controls-row">
+      <div id="controls-right">
+        <div id="game-buttons">
+          <button id="btnIn">IN</button>
+          <button id="btnStart">Start</button>
+        </div>
+        <div id="nav-buttons">
+          <button id="btnLobby" title="Back to Lobby">🏠</button>
+          <button id="btnSettings" title="Settings">⚙️</button>
+        </div>
+        <button id="btnDebug" style="display:none;">Debug</button>
+      </div>
+
+      <div id="playerStatus"></div>
+    </div>
+    
+    <!-- Settings Menu -->
+    <div id="settingsOverlay" class="settings-overlay hidden">
+      <div class="settings-panel">
+        <div class="settings-header">
+          <h2>Menu</h2>
+          <button id="btnCloseSettings" class="close-btn">&times;</button>
+        </div>
+        <div class="settings-tabs">
+          <button class="settings-tab active" data-tab="settings">Settings</button>
+          <button class="settings-tab" data-tab="leaderboard">Leaderboard</button>
+        </div>
+        <div class="settings-content" id="settingsTabContent">
+          <div class="setting-group">
+            <label>Sound Effects</label>
+            <div class="toggle-switch">
+              <input type="checkbox" id="toggleSound" checked>
+              <span class="slider"></span>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>Sound Volume</label>
+            <input type="range" id="volumeSlider" min="0" max="100" value="60">
+            <span id="volumeValue">60%</span>
+          </div>
+          <div class="setting-group">
+            <label>Animation Speed</label>
+            <input type="range" id="animationSpeedSlider" min="25" max="200" value="100">
+            <span id="animationSpeedValue">100%</span>
+          </div>
+          <div class="setting-group">
+            <label>Table Color</label>
+            <div class="color-options">
+              <button class="color-btn active" data-color="#1a472a" style="background:#1a472a;"></button>
+              <button class="color-btn" data-color="#1a2a4a" style="background:#1a2a4a;"></button>
+              <button class="color-btn" data-color="#4a1a1a" style="background:#4a1a1a;"></button>
+              <button class="color-btn" data-color="#3d3d3d" style="background:#3d3d3d;"></button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>Bot Difficulty</label>
+            <div class="difficulty-options">
+              <button class="difficulty-btn" data-difficulty="easy">Easy</button>
+              <button class="difficulty-btn active" data-difficulty="medium">Medium</button>
+              <button class="difficulty-btn" data-difficulty="hard">Hard</button>
+            </div>
+          </div>
+          <div class="setting-group">
+            <label>Fullscreen Mode</label>
+            <button id="btnFullscreen" class="fullscreen-btn">Enter Fullscreen</button>
+          </div>
+        </div>
+        <div class="leaderboard-content hidden" id="leaderboardTabContent">
+          <div class="leaderboard-mode-tabs">
+            <button class="leaderboard-mode-tab active" data-mode="solo">Solo (vs Bots)</button>
+            <button class="leaderboard-mode-tab" data-mode="multiplayer">Multiplayer</button>
+          </div>
+          
+          <!-- Solo Mode Stats -->
+          <div class="leaderboard-mode-content" id="soloLeaderboardContent">
+            <div class="player-stats-section">
+              <h3>Your Solo Stats</h3>
+              <div class="player-stats-card">
+                <div class="player-avatar">🤖</div>
+                <div class="player-info">
+                  <div class="player-name" id="soloStatsPlayerName">Player</div>
+                  <div class="player-rating" id="soloStatsPlayerRating">Rating: 1000</div>
+                </div>
+              </div>
+              <div class="stats-grid">
+                <div class="stat-item">
+                  <span class="stat-value" id="soloStatsGamesPlayed">0</span>
+                  <span class="stat-label">Games Played</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value" id="soloStatsGamesWon">0</span>
+                  <span class="stat-label">Games Won</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value" id="soloStatsWinRate">0%</span>
+                  <span class="stat-label">Win Rate</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value" id="soloStatsCurrentStreak">0</span>
+                  <span class="stat-label">Win Streak</span>
+                </div>
+              </div>
+            </div>
+            <div class="leaderboard-section">
+              <h3>Top Solo Players</h3>
+              <div class="leaderboard-list" id="soloLeaderboardList">
+                <div class="leaderboard-empty">No solo games played yet</div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Multiplayer Stats -->
+          <div class="leaderboard-mode-content hidden" id="multiplayerLeaderboardContent">
+            <div class="player-stats-section">
+              <h3>Your Multiplayer Stats</h3>
+              <div class="player-stats-card">
+                <div class="player-avatar">👥</div>
+                <div class="player-info">
+                  <div class="player-name" id="mpStatsPlayerName">Player</div>
+                  <div class="player-rating" id="mpStatsPlayerRating">Rating: 1000</div>
+                </div>
+              </div>
+              <div class="stats-grid">
+                <div class="stat-item">
+                  <span class="stat-value" id="mpStatsGamesPlayed">0</span>
+                  <span class="stat-label">Games Played</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value" id="mpStatsGamesWon">0</span>
+                  <span class="stat-label">Games Won</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value" id="mpStatsWinRate">0%</span>
+                  <span class="stat-label">Win Rate</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value" id="mpStatsCurrentStreak">0</span>
+                  <span class="stat-label">Win Streak</span>
+                </div>
+              </div>
+            </div>
+            <div class="leaderboard-section">
+              <h3>Top Multiplayer Players</h3>
+              <div class="leaderboard-list" id="mpLeaderboardList">
+                <div class="leaderboard-empty">No multiplayer games played yet</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="stats-actions">
+            <button id="btnResetStats" class="reset-stats-btn">Reset Statistics</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Player 1 hand -->
+    <div id="hand-bottom" class="hand-row"></div>
+
+    <!-- Elimination notification overlay -->
+    <div id="eliminationOverlay" class="elimination-overlay hidden">
+      <div class="elimination-content">
+        <div class="elimination-header">ELIMINATED!</div>
+        <div id="eliminationPlayerName" class="elimination-player"></div>
+        <div class="elimination-reason-title">Invalid Meld Detected:</div>
+        <div id="eliminationDetails" class="elimination-details"></div>
+        <div class="elimination-footer">Hand cards sent to bottom of discard pile</div>
+      </div>
+    </div>
+
+    <!-- Victory celebration overlay -->
+    <div id="victoryOverlay" class="victory-overlay hidden">
+      <div class="confetti-container" id="confettiContainer"></div>
+      <div class="victory-content">
+        <div class="victory-trophy">&#127942;</div>
+        <div id="victoryPlayerName" class="victory-player"></div>
+        <div class="victory-header">WINS!</div>
+        <div class="victory-stars">&#11088; &#11088; &#11088; &#11088; &#11088;</div>
+        <div id="victoryMessage" class="victory-message">Congratulations on your victory!</div>
+        <button id="victoryPlayAgain" class="victory-btn">Play Again</button>
+        <div class="victory-footer">You are the Kalooki Champion!</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Socket.io for multiplayer -->
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- Main table logic (relative path) -->
+  <script src="js/kaloki-table.js"></script>
+</body>
+</html>
