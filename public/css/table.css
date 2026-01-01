@@ -1760,8 +1760,8 @@ body.out-mode-active #table-root::after {
   background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
   border-radius: 15px;
   padding: 25px;
-  min-width: 320px;
-  max-width: 400px;
+  width: 70vw;
+  max-width: 960px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
   border: 2px solid #444;
 }
@@ -1797,9 +1797,10 @@ body.out-mode-active #table-root::after {
 }
 
 .settings-content {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  row-gap: 18px;
 }
 
 .setting-group {
@@ -2368,7 +2369,9 @@ input[type="range"] {
 }
 
 .leaderboard-mode-content {
-  display: block;
+  display: flex;
+  flex-direction: row;
+  gap: 24px;
 }
 
 .leaderboard-mode-content.hidden {
@@ -2400,4 +2403,22 @@ input[type="range"] {
   width: 50px;
   height: 70px;
   margin: 0 -15px;
+}
+
+
+@media (max-width: 900px) {
+  .settings-panel {
+    width: 90vw;
+    max-width: 90vw;
+  }
+
+  .settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .leaderboard-mode-content {
+    flex-direction: column;
+  }
 }

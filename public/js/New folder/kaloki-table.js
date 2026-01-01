@@ -208,8 +208,6 @@ function showShuffleAnimation(onComplete) {
 // Initialize sounds when page loads
 document.addEventListener('DOMContentLoaded', () => {
   initSounds();
-  ensureSeatColorStyles();
-  initFullscreenGate();
 });
 
 // ============= MULTIPLAYER & SETTINGS =============
@@ -741,45 +739,22 @@ function initChat() {
   const chatInput = document.getElementById('chatInput');
   const btnSendChat = document.getElementById('btnSendChat');
   const btnToggleChat = document.getElementById('btnToggleChat');
-
+  
   if (!chatBox) return;
-
-  // Apply minimize state without depending on external CSS
-  function applyChatMinimizeState(minimized) {
-    chatBox.classList.toggle('minimized', minimized);
-
-    if (btnToggleChat) {
-      btnToggleChat.textContent = minimized ? '+' : '−';
-    }
-    if (chatMessages) chatMessages.style.display = minimized ? 'none' : '';
-    if (chatInput) chatInput.style.display = minimized ? 'none' : '';
-    if (btnSendChat) btnSendChat.style.display = minimized ? 'none' : '';
-
-    // Visually collapse the chat box to just the header area
-    if (minimized) {
-      chatBox.style.height = '34px';
-      chatBox.style.overflow = 'hidden';
-    } else {
-      chatBox.style.height = '';
-      chatBox.style.overflow = '';
-    }
-  }
-
-  // Start minimized by default
-  applyChatMinimizeState(true);
-
+  
   // Toggle chat minimize/expand
   if (btnToggleChat) {
     btnToggleChat.addEventListener('click', () => {
-      applyChatMinimizeState(!chatBox.classList.contains('minimized'));
+      chatBox.classList.toggle('minimized');
+      btnToggleChat.textContent = chatBox.classList.contains('minimized') ? '+' : '−';
     });
   }
-
+  
   // Send message on button click
   if (btnSendChat) {
     btnSendChat.addEventListener('click', sendChatMessage);
   }
-
+  
   // Send message on Enter key
   if (chatInput) {
     chatInput.addEventListener('keypress', (e) => {
@@ -1643,7 +1618,6 @@ function animateDiscardUnified(seat, card, onComplete) {
   // Create flying card with proper CSS class for transitions
   const flyingCard = document.createElement('div');
   flyingCard.className = 'discarding-card';
-  if (seat) flyingCard.classList.add('discarded-by-' + seat);
   
   // Show card face
   let cardImage = 'cards/BACK_JAMAICA.png';
@@ -1918,7 +1892,7 @@ let gameState = {
     right: false
   },
 
-  // Track which meld groups are invalid when a player is eliminated
+  // Track which meld groups are invalid (locked, glowing red)
   invalidMelds: {
     bottom: [],
     top: [],
@@ -2634,8 +2608,6 @@ function createCardElement(card) {
     
     const [discarded] = hand.splice(idx, 1);
 
-    discarded.discardedBySeat = 'bottom';
-
     gameState.lastDiscardSource = gameState.lastDrawSource;
     gameState.lastDiscardCardId = discarded.id;
     gameState.lastDiscardSeat = 'bottom';
@@ -2864,18 +2836,20 @@ function setupHandContainerDragHandlers(handEl) {
   });
 }
 
-function createSetCardElement(card, seat) {
+function createSetCardElement(card, seat, isLocked = false) {
   const img = document.createElement('img');
   img.classList.add('card', 'set-card', 'meld-card');
   img.src = `/cards/${card.imageKey}.png`;
   img.draggable = false;
   img.dataset.cardId = card.id;
   img.dataset.seat = seat;
+  if (isLocked) {
+    img.dataset.locked = 'true';
+  }
   
-  // Add seat-coloured glow for goers played this turn
+  // Add yellow glow for goers played this turn
   if (card.isGoer && gameState.goersThisTurn.includes(card.id)) {
-    const bySeat = card.goerBySeat || gameState.turnSeat || 'bottom';
-    img.classList.add('goer-glow-' + bySeat);
+    img.classList.add('goer-glow');
   }
   
   // Add orange glow for joker swap cards (the natural card that replaced a joker)
@@ -3696,7 +3670,6 @@ function animateEliminationCards(cards, seat, onComplete) {
     setTimeout(() => {
       const flyingCard = document.createElement('div');
       flyingCard.className = 'discarding-card elimination-card';
-  if (seat) flyingCard.classList.add('discarded-by-' + seat);
       flyingCard.style.backgroundImage = `url("cards/${card.imageKey}.png")`;
       flyingCard.style.left = (seatRect.left + seatRect.width / 2 - 50) + 'px';
       flyingCard.style.top = (seatRect.top + seatRect.height / 2 - 75) + 'px';
@@ -3856,11 +3829,17 @@ function botAddGoersForSeat(seat) {
         const targetSets = gameState.sets[targetSeat];
         if (!targetSets || !targetSets.length) continue;
         
+        // Get invalid melds for THIS target seat (fresh lookup each time)
+        const invalidIndices = (gameState.invalidMelds && gameState.invalidMelds[targetSeat]) || [];
+        
         // Build fresh grouped data for this target seat
         const groups = groupMeldCards(targetSets);
 
         for (let gi = 0; gi < groups.length; gi++) {
           if (placed) break;
+          
+          // Skip locked/invalid meld groups - cannot play on them
+          if (invalidIndices.includes(gi)) continue;
           
           const g = groups[gi];
           if (!g.length) continue;
@@ -3892,7 +3871,6 @@ function botAddGoersForSeat(seat) {
           // If playing on another player's set, mark as a goer
           if (targetSeat !== seat) {
             card.isGoer = true;
-          card.goerBySeat = seat;
             if (gameState.goersThisTurn) {
               gameState.goersThisTurn.push(card.id);
             }
@@ -4301,15 +4279,12 @@ function stageJokerSwap(naturalCard, jokerCard, targetSeat, groupId) {
   naturalCard.laidTurn = gameState.currentTurnId || 0;
   seatSets[jokerIndex] = naturalCard;
 
-  // Move Joker to the bottom player's SET BOX in a new group
-  const playerSets = gameState.sets.bottom;
-  const newGroupId = nextGroupId();
-
+  // Move joker back to player's hand (free – no special group, no lock)
   jokerCard.jokerRepRank = null;
   jokerCard.jokerRepSuit = null;
-  jokerCard.groupId = newGroupId;
+  jokerCard.groupId = null;
   jokerCard.laidTurn = gameState.currentTurnId || 0;
-  playerSets.push(jokerCard);
+  gameState.hands.bottom.push(jokerCard);
 
   // Re-sort and re-assign joker reps in the target meld
   autoSortGroupIfComplete(seatSets, actualGroupId);
@@ -4462,6 +4437,7 @@ function renderSeatSetRow(seat, elementId) {
 
   const cards = gameState.sets[seat] || [];
   const groups = groupMeldCards(cards);
+  const invalidIndices = (gameState.invalidMelds && gameState.invalidMelds[seat]) || [];
 
   // Separate pending Joker group from regular melds (for bottom seat)
   let pendingJokerGroupData = null;
@@ -4486,8 +4462,15 @@ function renderSeatSetRow(seat, elementId) {
       groupEl.classList.add('set-group-vert');
     }
     
+    // Check if this group is marked as invalid
+    const isInvalid = invalidIndices.includes(groupIndex);
+    if (isInvalid) {
+      groupEl.classList.add('invalid-meld');
+      groupEl.dataset.locked = 'true';
+    }
+
     group.forEach((card, index) => {
-      const cardEl = createSetCardElement(card, seat);
+      const cardEl = createSetCardElement(card, seat, isInvalid);
       if (index === 0) {
         cardEl.classList.add('set-card-first');
       }
@@ -4526,7 +4509,7 @@ function renderSeatSetRow(seat, elementId) {
     });
 
     pendingJokerGroupData.forEach((card, index) => {
-      const cardEl = createSetCardElement(card, seat);
+      const cardEl = createSetCardElement(card, seat, false);
       if (index === 0) {
         cardEl.classList.add('set-card-first');
       }
@@ -4629,11 +4612,6 @@ function renderPiles() {
         
         const cardEl = document.createElement('div');
         cardEl.className = 'pack-card' + (isTopCard ? ' top-card' : '');
-
-        // Colour-outline the pack card by who discarded it
-        if (card.discardedBySeat) {
-          cardEl.classList.add('discarded-by-' + card.discardedBySeat);
-        }
         cardEl.style.backgroundImage = `url("cards/${card.imageKey}.png")`;
         cardEl.style.left = pos.x + 'px';
         cardEl.style.top = pos.y + 'px';
@@ -4686,7 +4664,6 @@ function animateDiscardFromCapturedRect(card, capturedRect, seat, onComplete) {
   // Create flying card - SAME as solo mode
   const flyingCard = document.createElement('div');
   flyingCard.className = 'discarding-card';
-  if (seat) flyingCard.classList.add('discarded-by-' + seat);
   flyingCard.style.backgroundImage = `url("cards/${card.imageKey}.png")`;
   flyingCard.style.left = startX + 'px';
   flyingCard.style.top = startY + 'px';
@@ -4790,7 +4767,6 @@ function animateDiscardCore(seat, card, onComplete) {
   // Create flying card with the EXACT same class as solo mode
   const flyingCard = document.createElement('div');
   flyingCard.className = 'discarding-card';
-  if (seat) flyingCard.classList.add('discarded-by-' + seat);
   flyingCard.style.backgroundImage = `url("cards/${card.imageKey}.png")`;
   flyingCard.style.left = startX + 'px';
   flyingCard.style.top = startY + 'px';
@@ -4841,7 +4817,6 @@ function animateDiscardFromRect(card, fromRect, onComplete) {
   // Create flying card
   const flyingCard = document.createElement('div');
   flyingCard.className = 'discarding-card';
-  if (card && card.discardedBySeat) flyingCard.classList.add('discarded-by-' + card.discardedBySeat);
   flyingCard.style.backgroundImage = `url("cards/${card.imageKey}.png")`;
 
   // Start position from saved rect
@@ -5312,9 +5287,13 @@ function handleSetZonePointerDrop(seat, clientX, clientY, card) {
     }
   }
   
-  // Check drop target position for set zone interactions
+  // Check if dropping on a locked (invalid) set group
   const elemAtPoint = document.elementFromPoint(clientX, clientY);
   const targetGroup = elemAtPoint ? elemAtPoint.closest('.meld-group') : null;
+  if (targetGroup && targetGroup.classList.contains('invalid-meld')) {
+    setStatus('Cannot play cards on invalid sets! This set is locked.');
+    return true; // Handled (rejected)
+  }
   
   const hand = gameState.hands.bottom;
   const idx = hand.findIndex(c => c.id === card.id);
@@ -5377,19 +5356,25 @@ function handleSetZonePointerDrop(seat, clientX, clientY, card) {
                 return true;
               }
 
-                            // Stage the swap: natural card into meld, Joker to your HAND (no locked group)
+              // Joker swap is only valid when going out to WIN
+              // Hand must have at most 2 cards: the natural card for swap + (optionally) the discard
+              if (hand.length > 2) {
+                setStatus('Joker swap only allowed when going out to WIN! You have too many cards.');
+                return true;
+              }
+
+              // Remove the natural card from hand
+              hand.splice(idx, 1);
+
+              // Stage the swap: natural card into meld, Joker to your HAND (no locked group)
               if (!stageJokerSwap(card, matchingJoker, seat, targetCard.groupId)) {
+                // Put card back if anything goes wrong
+                hand.splice(idx, 0, card);
                 setStatus('Joker swap failed.');
                 return true;
               }
 
-              // Now remove the natural card from hand (it has moved into the meld)
-              const handIdx = hand.findIndex(c => c.id === card.id);
-              if (handIdx !== -1) {
-                hand.splice(handIdx, 1);
-              }
-
-              setStatus('Joker swapped to your set box. You must go OUT this turn or the swap will be rolled back.');
+              setStatus('Joker swapped to your hand. You must go OUT this turn or the swap will be rolled back.');
               playSound('draw');
 
               renderBottomHand();
@@ -5425,7 +5410,6 @@ function handleSetZonePointerDrop(seat, clientX, clientY, card) {
   // If playing on another player's set, mark as a goer (yellow glow)
   if (seat !== 'bottom') {
     card.isGoer = true;
-    card.goerBySeat = 'bottom';
     gameState.goersThisTurn.push(card.id);
   }
   
@@ -5554,28 +5538,6 @@ function placeCardIntoSetRow(card, seat, dropEvent) {
           }
         }
         
-        // Horizontal seats fallback: if dropping inside a meld group container (but not directly on a card),
-        // snap to that group to avoid accidental splits on overlapping cards (common when building around a swapped Joker).
-        if (!targetCardEl && !isVerticalSeat(seat)) {
-          const hitEl = document.elementFromPoint(clientX, clientY);
-          const hitGroup = hitEl ? hitEl.closest('.set-group, .meld-group') : null;
-          if (hitGroup && !hitGroup.classList.contains('pending-joker-group')) {
-            const groupCardEls = Array.from(hitGroup.querySelectorAll('.set-card'))
-              .filter(el => !isPendingJokerCard(el));
-            if (groupCardEls.length > 0) {
-              const gRect = hitGroup.getBoundingClientRect();
-              const midX = gRect.left + gRect.width / 2;
-              if (clientX < midX) {
-                targetCardEl = groupCardEls[0];
-                targetSide = 'before';
-              } else {
-                targetCardEl = groupCardEls[groupCardEls.length - 1];
-                targetSide = 'after';
-              }
-            }
-          }
-        }
-
         // For vertical seats, if no card was close enough but there are groups,
         // try to find the nearest group and add to it (excluding pending Joker group)
         if (!targetCardEl && isVerticalSeat(seat)) {
@@ -5809,6 +5771,12 @@ function setupSetZoneDragAndDrop() {
 
       e.preventDefault();
       
+      // Check if dropping on a locked (invalid) set group
+      const targetGroup = e.target.closest('.meld-group');
+      if (targetGroup && targetGroup.classList.contains('invalid-meld')) {
+        setStatus('Cannot play cards on invalid sets! This set is locked.');
+        return;
+      }
       
       const cardId = e.dataTransfer.getData('text/plain') || gameState.draggingCardId;
       if (!cardId) return;
@@ -5870,17 +5838,20 @@ function setupSetZoneDragAndDrop() {
                   return;
                 }
                 
-                                
+                // Joker swap is only valid when going out to WIN
+                // Hand must have exactly 2 cards: the natural card for swap + the discard
+                if (hand.length > 2) {
+                  setStatus('Joker swap only allowed when going out to WIN! You have too many cards.');
+                  return;
+                }
+                
                 // This is a Joker swap attempt!
+                // Remove card from hand first
+                hand.splice(idx, 1);
+                
                 // Stage the swap
                 if (stageJokerSwap(card, actualJoker, seat, targetCard.groupId)) {
-                  // Now remove the natural card from hand (it has moved into the meld)
-                  const handIdx = hand.findIndex(c => c.id === card.id);
-                  if (handIdx !== -1) {
-                    hand.splice(handIdx, 1);
-                  }
-
-                  setStatus('Joker swap staged to your set box. You must go OUT this turn or the swap will be rolled back.');
+                  setStatus('Joker swap staged! Discard the Joker to WIN, or your swap will be rolled back.');
                   playSound('draw');
                   
                   renderBottomHand();
@@ -5919,7 +5890,6 @@ function setupSetZoneDragAndDrop() {
       // If playing on another player's set, mark as a goer (yellow glow)
       if (seat !== 'bottom') {
         card.isGoer = true;
-    card.goerBySeat = 'bottom';
         gameState.goersThisTurn.push(card.id);
       }
       
@@ -5947,296 +5917,7 @@ function isBottomTurn() {
   return gameState.turnSeat === 'bottom' && gameState.turnSeat !== null;
 }
 
-
-// Seat-specific colours (set boxes, goer glow, and discard highlights)
-function ensureSeatColorStyles() {
-  if (document.getElementById('seatColorStyles')) return;
-
-  const styleEl = document.createElement('style');
-  styleEl.id = 'seatColorStyles';
-
-  // Palette: bottom (cyan), left (green), top (red), right (purple)
-  styleEl.textContent = `
-    :root{
-      --seat-bottom:#00b7ff;
-      --seat-left:#00e676;
-      --seat-top:#ff5252;
-      --seat-right:#b388ff;
-
-      --seat-bottom-soft:rgba(0,183,255,0.28);
-      --seat-left-soft:rgba(0,230,118,0.28);
-      --seat-top-soft:rgba(255,82,82,0.28);
-      --seat-right-soft:rgba(179,136,255,0.28);
-    }
-
-    /* Set boxes: force a single seat-coloured border (overrides any existing yellow/dotted styling) */
-#set-bottom{
-  --seat-color:var(--seat-bottom);
-  --seat-soft:var(--seat-bottom-soft);
-  border:3px solid var(--seat-bottom) !important;
-  border-style:solid !important;
-  outline:none !important;
-  box-shadow:none !important;
-  border-radius:12px;
-  box-sizing:border-box;
-}
-#set-left{
-  --seat-color:var(--seat-left);
-  --seat-soft:var(--seat-left-soft);
-  border:3px solid var(--seat-left) !important;
-  border-style:solid !important;
-  outline:none !important;
-  box-shadow:none !important;
-  border-radius:12px;
-  box-sizing:border-box;
-}
-#set-top{
-  --seat-color:var(--seat-top);
-  --seat-soft:var(--seat-top-soft);
-  border:3px solid var(--seat-top) !important;
-  border-style:solid !important;
-  outline:none !important;
-  box-shadow:none !important;
-  border-radius:12px;
-  box-sizing:border-box;
-}
-#set-right{
-  --seat-color:var(--seat-right);
-  --seat-soft:var(--seat-right-soft);
-  border:3px solid var(--seat-right) !important;
-  border-style:solid !important;
-  outline:none !important;
-  box-shadow:none !important;
-  border-radius:12px;
-  box-sizing:border-box;
-}
-
-/* Goer glow on meld cards (seat-specific) */
-    img.goer-glow-bottom{ filter: drop-shadow(0 0 10px var(--seat-bottom)) drop-shadow(0 0 10px var(--seat-bottom)); }
-    img.goer-glow-left{ filter: drop-shadow(0 0 10px var(--seat-left)) drop-shadow(0 0 10px var(--seat-left)); }
-    img.goer-glow-top{ filter: drop-shadow(0 0 10px var(--seat-top)) drop-shadow(0 0 10px var(--seat-top)); }
-    img.goer-glow-right{ filter: drop-shadow(0 0 10px var(--seat-right)) drop-shadow(0 0 10px var(--seat-right)); }
-
-    /* Pack/discard card outline by discarder */
-    .pack-card.discarded-by-bottom{ box-shadow:0 0 0 2px var(--seat-bottom) inset !important; }
-    .pack-card.discarded-by-left{ box-shadow:0 0 0 2px var(--seat-left) inset !important; }
-    .pack-card.discarded-by-top{ box-shadow:0 0 0 2px var(--seat-top) inset !important; }
-    .pack-card.discarded-by-right{ box-shadow:0 0 0 2px var(--seat-right) inset !important; }
-
-    .pack-card.top-card.discarded-by-bottom{ box-shadow:0 0 14px 4px var(--seat-bottom-soft), 0 0 0 2px var(--seat-bottom) inset !important; }
-    .pack-card.top-card.discarded-by-left{ box-shadow:0 0 14px 4px var(--seat-left-soft), 0 0 0 2px var(--seat-left) inset !important; }
-    .pack-card.top-card.discarded-by-top{ box-shadow:0 0 14px 4px var(--seat-top-soft), 0 0 0 2px var(--seat-top) inset !important; }
-    .pack-card.top-card.discarded-by-right{ box-shadow:0 0 14px 4px var(--seat-right-soft), 0 0 0 2px var(--seat-right) inset !important; }
-
-    /* Flying discard animation glow by discarder */
-    .discarding-card.discarded-by-bottom{ box-shadow:0 0 18px 6px var(--seat-bottom-soft) !important; }
-    .discarding-card.discarded-by-left{ box-shadow:0 0 18px 6px var(--seat-left-soft) !important; }
-    .discarding-card.discarded-by-top{ box-shadow:0 0 18px 6px var(--seat-top-soft) !important; }
-    .discarding-card.discarded-by-right{ box-shadow:0 0 18px 6px var(--seat-right-soft) !important; }
-
-  `;
-
-  document.head.appendChild(styleEl);
-}
-
-
-function ensureFullscreenGateStyles() {
-  if (document.getElementById('fullscreenGateStyles')) return;
-
-  const style = document.createElement('style');
-  style.id = 'fullscreenGateStyles';
-  style.textContent = `
-    /* Fullscreen gate overlay (browser requires user gesture for requestFullscreen) */
-    #fullscreenGate {
-      position: fixed;
-      inset: 0;
-      z-index: 99999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,0.72);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      user-select: none;
-    }
-    #fullscreenGate .fg-card {
-      width: min(520px, calc(100vw - 28px));
-      border-radius: 16px;
-      padding: 18px 18px 14px;
-      background: rgba(20,20,22,0.92);
-      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-      border: 1px solid rgba(255,255,255,0.14);
-      text-align: center;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      color: #fff;
-    }
-    #fullscreenGate .fg-title {
-      font-size: 18px;
-      font-weight: 700;
-      margin-bottom: 6px;
-      letter-spacing: 0.2px;
-    }
-    #fullscreenGate .fg-sub {
-      font-size: 13px;
-      opacity: 0.85;
-      margin-bottom: 12px;
-      line-height: 1.35;
-    }
-    #fullscreenGate .fg-actions {
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    #fullscreenGate button {
-      border: 0;
-      border-radius: 12px;
-      padding: 10px 14px;
-      cursor: pointer;
-      font-weight: 700;
-      font-size: 13px;
-    }
-    #fullscreenGate .fg-primary {
-      background: rgba(255,255,255,0.92);
-      color: #111;
-    }
-    #fullscreenGate .fg-secondary {
-      background: rgba(255,255,255,0.12);
-      color: #fff;
-      border: 1px solid rgba(255,255,255,0.18);
-    }
-  `;
-  document.head.appendChild(style);
-}
-
-function isStandaloneDisplayMode() {
-  try {
-    // PWA / installed app modes
-    if (window.matchMedia) {
-      if (window.matchMedia('(display-mode: fullscreen)').matches) return true;
-      if (window.matchMedia('(display-mode: standalone)').matches) return true;
-    }
-    // iOS Safari
-    if (window.navigator && window.navigator.standalone) return true;
-  } catch (e) {}
-  return false;
-}
-
-async function requestAppFullscreen() {
-  const el = document.documentElement;
-
-  // Standard
-  if (el.requestFullscreen) {
-    try {
-      // navigationUI is optional; ignore if not supported
-      return await el.requestFullscreen({ navigationUI: 'hide' });
-    } catch (e) {
-      // Retry without options (some browsers reject options)
-      return await el.requestFullscreen();
-    }
-  }
-
-  // Safari legacy
-  if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
-
-  return null;
-}
-
-function initFullscreenGate() {
-  // You cannot force fullscreen on page load in modern browsers (requires user gesture).
-  // This adds a single-click gate to enter fullscreen immediately.
-  if (isStandaloneDisplayMode()) return;
-  if (!document.fullscreenEnabled && !document.documentElement.webkitRequestFullscreen) return;
-
-  // If already in fullscreen, do nothing
-  if (document.fullscreenElement) return;
-
-  ensureFullscreenGateStyles();
-
-  // Try once on load (usually rejected, harmless)
-  requestAppFullscreen().catch(() => {});
-
-  // Create overlay
-  const gate = document.createElement('div');
-  gate.id = 'fullscreenGate';
-  gate.innerHTML = `
-    <div class="fg-card">
-      <div class="fg-title">Start in fullscreen</div>
-      <div class="fg-sub">Browsers require a click/tap to enter fullscreen.</div>
-      <div class="fg-actions">
-        <button class="fg-primary" type="button">Enter fullscreen</button>
-        <button class="fg-secondary" type="button">Continue windowed</button>
-      </div>
-    </div>
-  `;
-
-  // Avoid duplicates
-  if (document.getElementById('fullscreenGate')) return;
-  document.body.appendChild(gate);
-
-  const removeGate = () => {
-    const g = document.getElementById('fullscreenGate');
-    if (g) g.remove();
-    document.removeEventListener('fullscreenchange', onFsChange);
-  };
-
-  const onFsChange = () => {
-    if (document.fullscreenElement) removeGate();
-  };
-  document.addEventListener('fullscreenchange', onFsChange);
-
-  const primary = gate.querySelector('.fg-primary');
-  const secondary = gate.querySelector('.fg-secondary');
-
-  const tryEnter = async () => {
-    try {
-      await requestAppFullscreen();
-    } catch (e) {
-      // If it fails, let the user continue without being blocked.
-    } finally {
-      // Remove either way so gameplay can start
-      removeGate();
-    }
-  };
-
-  primary.addEventListener('click', (e) => {
-    e.preventDefault();
-    tryEnter();
-  });
-
-  secondary.addEventListener('click', (e) => {
-    e.preventDefault();
-    removeGate();
-  });
-
-  // Clicking the dark background acts like primary (fast start)
-  gate.addEventListener('click', (e) => {
-    if (e.target === gate) tryEnter();
-  });
-}
-
-
-function injectBrighterTurnGlowStyles() {
-  if (document.getElementById('brighterTurnGlowStyles')) return;
-  const style = document.createElement('style');
-  style.id = 'brighterTurnGlowStyles';
-  style.textContent = `
-    /* Brighter active-turn glow for all set boxes.
-       Uses seat colour if present (via --seat-color), otherwise falls back to gold. */
-    #set-bottom.active-turn, #set-top.active-turn, #set-left.active-turn, #set-right.active-turn {
-  border-color: var(--seat-color) !important;
-  box-shadow:
-    0 0 0 3px var(--seat-color),
-    0 0 22px 10px var(--seat-soft),
-    0 0 54px 22px var(--seat-soft),
-    inset 0 0 20px 7px rgba(255,255,255,0.12) !important;
-}
-  `;
-  document.head.appendChild(style);
-}
-
 function updateActiveTurnGlow() {
-  injectBrighterTurnGlowStyles();
   const setBottom = document.getElementById('set-bottom');
   const setTop = document.getElementById('set-top');
   const setLeft = document.getElementById('set-left');
@@ -7004,7 +6685,6 @@ function botProcessAndDiscard(seat, drawSource) {
 
   // Animate bot discard
   animateDiscard(discarded, miniHandEl, () => {
-    discarded.discardedBySeat = seat;
     gameState.pack.push(discarded);
     trackDiscard(discarded, seat); // Track for bot AI
     renderPiles();
