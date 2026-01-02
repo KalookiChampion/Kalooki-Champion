@@ -3742,6 +3742,7 @@ function chooseOpeningMeldsForSeat(seat, options = {}) {
 
   const opts = options || {};
   const requiredCardId = opts.requiredCardId || null;
+  const stopAt40 = !!opts.stopAt40;
 
   const n = hand.length;
   const candidates = [];
@@ -3793,6 +3794,7 @@ function chooseOpeningMeldsForSeat(seat, options = {}) {
 
   const chosen = [];
   let usedMask = 0;
+  let runningTotal = 0;
 
   // If we must use a specific card (eg, PACK card), force the best meld
   // containing that card to be chosen first.
@@ -3806,6 +3808,7 @@ function chooseOpeningMeldsForSeat(seat, options = {}) {
     const first = packCandidates[0];
     chosen.push(first);
     usedMask |= first.mask;
+    runningTotal += first.score;
   }
 
   // Then greedily add the best non-overlapping melds
@@ -3813,6 +3816,8 @@ function chooseOpeningMeldsForSeat(seat, options = {}) {
     if ((usedMask & cand.mask) !== 0) continue;
     chosen.push(cand);
     usedMask |= cand.mask;
+    runningTotal += cand.score;
+    if (stopAt40 && runningTotal >= 40) break;
   }
 
   return chosen;
@@ -4258,11 +4263,10 @@ function isValidJokerSwapAttempt(naturalCard, jokerCard, targetSeat) {
   return true;
 }
 
-// Stage a Joker swap - put natural card in meld, Joker goes to player's hand
-// This is STAGED and only validated when player tries to win
-// Stage a Joker swap - put natural card in meld, Joker goes to player's hand
-// This is STAGED and only validated when player tries to win
-function stageJokerSwap(naturalCard, jokerCard, targetSeat, groupId) {
+// Stage a Joker swap - put natural card in meld, Joker goes to swapper's SET BOX in a new group.
+// This is STAGED and only validated when the swapper goes OUT; otherwise rolled back.
+// swapperSeat defaults to 'bottom' (human player), but bots can also swap.
+function stageJokerSwap(naturalCard, jokerCard, targetSeat, groupId, swapperSeat = 'bottom') {
   const seatSets = gameState.sets[targetSeat];
   if (!seatSets) return false;
 
@@ -4301,8 +4305,9 @@ function stageJokerSwap(naturalCard, jokerCard, targetSeat, groupId) {
   naturalCard.laidTurn = gameState.currentTurnId || 0;
   seatSets[jokerIndex] = naturalCard;
 
-  // Move Joker to the bottom player's SET BOX in a new group
-  const playerSets = gameState.sets.bottom;
+  // Move Joker to the swapper's SET BOX in a new group
+  const playerSets = gameState.sets[swapperSeat];
+  if (!playerSets) return false;
   const newGroupId = nextGroupId();
 
   jokerCard.jokerRepRank = null;
@@ -6717,9 +6722,7 @@ function botShouldDrawFromPack(seat) {
   // Restore the real hand
   gameState.hands[seat] = originalHand;
 
-  const usesTopCard = chosen.some(cand => cand && cand.group && cand.group.some(c => c && c.id === topCard.id));
-
-  if (!chosen.length || !usesTopCard) {
+  if (!chosen.length) {
     // No new meld is possible that uses the PACK card – drawing from PACK would be illegal
     return false;
   }
@@ -6763,6 +6766,171 @@ function findAllPossibleMelds(hand) {
 // Bot chooses which card to discard - uses smart AI based on difficulty setting
 function botChooseDiscard(seat) {
   return smartBotChooseDiscard(seat);
+}
+
+// Remove a specific card from a seat's hand (by id). Returns the removed card or null.
+function removeCardFromSeatHand(seat, cardId) {
+  const hand = gameState.hands[seat] || [];
+  const idx = hand.findIndex(c => c.id === cardId);
+  if (idx === -1) return null;
+  return hand.splice(idx, 1)[0];
+}
+
+// Bot helper: build a valid 3-card meld around a single Joker that has been swapped into the bot's set box.
+// Returns true if it successfully moved 2 hand cards into that Joker's group.
+function botBuildMeldAroundSwappedJoker(seat, jokerCardId) {
+  const seatSets = gameState.sets[seat] || [];
+  const hand = gameState.hands[seat] || [];
+  const joker = seatSets.find(c => c.id === jokerCardId && c.rank === 'JOKER');
+  if (!joker || !joker.groupId) return false;
+
+  // Try all pairs of NON-joker cards from hand to form a valid meld with this Joker
+  for (let i = 0; i < hand.length; i++) {
+    const c1 = hand[i];
+    if (!c1 || c1.rank === 'JOKER') continue;
+    for (let j = i + 1; j < hand.length; j++) {
+      const c2 = hand[j];
+      if (!c2 || c2.rank === 'JOKER') continue;
+
+      // Reset Joker rep each attempt so validation is consistent
+      joker.jokerRepRank = null;
+      joker.jokerRepSuit = null;
+
+      const group = [joker, c1, c2];
+      // Assign a representation so validation/sorting behaves consistently
+      assignJokerRepresentation(joker, group);
+
+      const ok = isValidSetGroup(group) || isValidRunGroup(group);
+      if (!ok) continue;
+
+      // Move the two cards from hand into the Joker group
+      const moved1 = removeCardFromSeatHand(seat, c1.id);
+      const moved2 = removeCardFromSeatHand(seat, c2.id);
+      if (!moved1 || !moved2) return false;
+
+      moved1.groupId = joker.groupId;
+      moved2.groupId = joker.groupId;
+      moved1.laidTurn = gameState.currentTurnId || 0;
+      moved2.laidTurn = gameState.currentTurnId || 0;
+      seatSets.push(moved1);
+      seatSets.push(moved2);
+
+      autoSortGroupIfComplete(seatSets, joker.groupId);
+      assignAllJokerRepresentationsInGroup(seatSets, joker.groupId);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Bot helper: aggressively lay down all available melds from hand (used for OUT attempts).
+function botLayDownAllPossibleMelds(seat, maxPasses = 4) {
+  const seatSets = gameState.sets[seat];
+  if (!seatSets) return;
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    const chosen = chooseOpeningMeldsForSeat(seat) || [];
+    if (!chosen.length) break;
+
+    const hand = gameState.hands[seat] || [];
+    const usedIds = new Set();
+    chosen.forEach(cand => cand.group.forEach(card => usedIds.add(card.id)));
+
+    // Remove used cards from hand
+    const remaining = [];
+    hand.forEach(c => {
+      if (!usedIds.has(c.id)) remaining.push(c);
+    });
+    gameState.hands[seat] = remaining;
+
+    // Add chosen meld groups into set box
+    chosen.forEach(cand => {
+      const gid = nextGroupId();
+
+      cand.group.forEach(card => {
+        if (card.rank === 'JOKER' && !card.jokerRepRank) {
+          assignJokerRepresentation(card, cand.group);
+        }
+      });
+
+      cand.group.forEach(card => {
+        card.groupId = gid;
+        card.laidTurn = gameState.currentTurnId || 0;
+        seatSets.push(card);
+      });
+      autoSortGroupIfComplete(seatSets, gid);
+      assignAllJokerRepresentationsInGroup(seatSets, gid);
+    });
+  }
+}
+
+// Bot: attempt a Joker swap ONLY if it enables going OUT this turn.
+// Returns true if a swap was made and the state is left in the "about to go OUT" configuration.
+function botTryGoOutWithJokerSwap(seat) {
+  if (!gameState.opened[seat]) return false;
+  const hand = gameState.hands[seat] || [];
+  if (!hand.length) return false;
+
+  // Index natural cards in hand by rank+suit for fast match
+  const naturalsByKey = new Map();
+  for (const c of hand) {
+    if (!c || c.rank === 'JOKER') continue;
+    const key = String(c.rank) + String(c.suit);
+    if (!naturalsByKey.has(key)) naturalsByKey.set(key, []);
+    naturalsByKey.get(key).push(c);
+  }
+
+  const otherSeats = ['bottom', 'top', 'left', 'right'].filter(s => s !== seat);
+
+  for (const targetSeat of otherSeats) {
+    const seatSets = gameState.sets[targetSeat] || [];
+    for (const jokerCandidate of seatSets) {
+      if (!jokerCandidate || jokerCandidate.rank !== 'JOKER') continue;
+      if (!jokerCandidate.groupId) continue;
+      if (!jokerCandidate.jokerRepRank || !jokerCandidate.jokerRepSuit) continue;
+
+      const key = String(jokerCandidate.jokerRepRank) + String(jokerCandidate.jokerRepSuit);
+      const matchingNaturals = naturalsByKey.get(key) || [];
+      if (!matchingNaturals.length) continue;
+
+      // Try each matching natural (usually 1, but there can be duplicates with 2 decks)
+      for (const naturalCard of matchingNaturals) {
+        if (!naturalCard) continue;
+
+        // Stage swap (snapshot is taken inside on first swap)
+        const ok = stageJokerSwap(naturalCard, jokerCandidate, targetSeat, jokerCandidate.groupId, seat);
+        if (!ok) {
+          // If stage failed after a snapshot was created, rollback to be safe
+          if (gameState.winAttemptSnapshot) rollbackJokerSwaps();
+          continue;
+        }
+
+        // Remove the natural from the bot hand (it moved into the meld)
+        removeCardFromSeatHand(seat, naturalCard.id);
+
+        // Build a valid meld around the swapped Joker (needs at least 2 more cards)
+        if (!botBuildMeldAroundSwappedJoker(seat, jokerCandidate.id)) {
+          rollbackJokerSwaps();
+          continue;
+        }
+
+        // Now aggressively lay down anything else possible to try to go OUT
+        botLayDownAllPossibleMelds(seat);
+        botAddGoersForSeat(seat);
+
+        // Must be in a position to go OUT this turn (0 cards or 1 card to discard)
+        const remaining = (gameState.hands[seat] || []).length;
+        if (remaining <= 1) {
+          return true;
+        }
+
+        // Not an OUT attempt -> rollback and keep searching
+        rollbackJokerSwaps();
+      }
+    }
+  }
+
+  return false;
 }
 
 function runSingleBotTurn(seat) {
@@ -6811,149 +6979,170 @@ function runSingleBotTurn(seat) {
     gameState.hasDrawn = true;
     gameState.lastDrawSource = drawSource;
     gameState.lastPackCardId = drawSource === 'pack' ? drawn.id : null;
-
+    
     // Track draw count for IN voting (closes voting when any player takes 2nd draw)
     incrementDrawCount(seat);
   }
 
-  // Ensure we have a plan container
-  if (!gameState._botTurnPlan) gameState._botTurnPlan = {};
-
-  // PACK draw: animate directly to the bot's set box (not into hand)
-  if (drawSource === 'pack' && drawn) {
-    // Choose melds now (must include the pack card)
-    const chosen = chooseOpeningMeldsForSeat(seat, { requiredCardId: drawn.id }) || [];
-
-    // Reserve a groupId for the meld that uses the PACK card (so the card can land first)
-    const packCand = chosen.find(cand => cand && cand.group && cand.group.some(c => c && c.id === drawn.id));
-    const packGroupId = nextGroupId();
-
-    // Store the plan for the processing step
-    gameState._botTurnPlan[seat] = {
-      chosen,
-      packCardId: drawn.id,
-      packGroupId
-    };
-
-    // Animate pack -> setbox, then actually place the pack card into the reserved group
-    renderPiles();
-
-    animateBotPackToSet(seat, drawn, () => {
-      // Update piles after animation shows card being taken
-      renderPiles();
-
-      // Place the PACK card into the bot's setbox immediately (rule: cannot be kept in hand)
-      if (packGroupId) {
-        const idx = gameState.hands[seat].findIndex(c => c.id === drawn.id);
-        if (idx !== -1) {
-          const [packCard] = gameState.hands[seat].splice(idx, 1);
-          packCard.laidTurn = gameState.currentTurnId || 0;
-          packCard.groupId = packGroupId;
-          gameState.sets[seat].push(packCard);
-
-          // Render so humans can see the card is now on the table
-          renderMiniHands();
-          if (demoMode && seat === 'bottom') renderBottomHand();
-          if (seat === 'bottom') renderBottomSetRow();
-          else if (seat === 'top') renderTopSetRow();
-          else if (seat === 'left') renderLeftSetRow();
-          else if (seat === 'right') renderRightSetRow();
-        }
-      }
-
-      // Small pause, then play the rest of the turn step-by-step
-      setTimeout(() => {
-        botProcessAndDiscard(seat, drawSource);
-      }, getAnimDuration(450));
-    });
-
-    return;
-  }
-
-  // DECK draw: animate to mini-hand as before, then play step-by-step
+  // Animate bot drawing from deck or pack, then wait before discarding
   animateBotDraw(seat, drawSource, () => {
     // Update piles after animation shows card being taken
     renderPiles();
-
-    // Small pause before bot starts playing cards (so humans can follow)
+    
+    // Wait 2 seconds before bot processes and discards
     setTimeout(() => {
       botProcessAndDiscard(seat, drawSource);
-    }, getAnimDuration(600));
+    }, getAnimDuration(2000)); // 2 second delay between draw and discard
   });
 }
 
 // Bot processing after draw - melds and discard
-async function botProcessAndDiscard(seat, drawSource) {
+function botProcessAndDiscard(seat, drawSource) {
   const hand = gameState.hands[seat];
-  if (!hand) return;
-
-  // Pull any pre-computed plan for this bot turn (PACK card group id, chosen melds, etc.)
-  const plan = (gameState._botTurnPlan && gameState._botTurnPlan[seat]) ? gameState._botTurnPlan[seat] : null;
-  if (gameState._botTurnPlan && gameState._botTurnPlan[seat]) {
-    delete gameState._botTurnPlan[seat];
-  }
-
+  
   const requiredCardId = (drawSource === 'pack') ? gameState.lastPackCardId : null;
 
-  const chosen = (plan && plan.chosen) ? plan.chosen : (chooseOpeningMeldsForSeat(seat, {
-    requiredCardId: requiredCardId
-  }) || []);
-
-  const packCardId = plan && plan.packCardId ? plan.packCardId : null;
-  const packGroupId = plan && plan.packGroupId ? plan.packGroupId : null;
-
+  // Opening-meld selection strategy:
+  // - If drawing from PACK, the PACK card must be melded immediately into the setbox,
+  //   and we only reveal enough additional meld(s) to reach 40.
+  // - If drawing from DECK, bots should *not* feel compelled to open just because
+  //   40+ is available. They only open from DECK when they can (almost) finish the hand.
+  let chosen = [];
   if (!gameState.opened[seat]) {
-    const mustOpenNow = (drawSource === 'pack');
-    const potentialScore = (chosen && chosen.length) ? chosen.reduce((sum, cand) => sum + (cand.score || 0), 0) : 0;
+    if (drawSource === 'pack') {
+      chosen = chooseOpeningMeldsForSeat(seat, { requiredCardId, stopAt40: true });
+    } else {
+      // Evaluate all possible non-overlapping melds, but don't auto-reveal them.
+      const allMelds = chooseOpeningMeldsForSeat(seat, { requiredCardId: null });
+      if (allMelds && allMelds.length) {
+        const usedIds = new Set();
+        let allScore = 0;
+        allMelds.forEach(cand => {
+          allScore += cand.score;
+          cand.group.forEach(card => usedIds.add(card.id));
+        });
+        const remainingCount = hand.filter(c => !usedIds.has(c.id)).length;
 
-    // If the bot drew from DECK, opening at 40+ is optional/strategic.
-    // If the bot drew from PACK, it MUST open now (because the pack card cannot be kept in hand).
-    const difficulty = settings.botDifficulty || 'medium';
-    let willOpenThisTurn = mustOpenNow;
-
-    if (!mustOpenNow && potentialScore >= 40) {
-      if (difficulty === 'easy') {
-        willOpenThisTurn = true;
-      } else if (difficulty === 'medium') {
-        // Medium bots often hold 40+ until it's useful
-        willOpenThisTurn = Math.random() < 0.40;
-      } else {
-        // Hard bots hold even more, unless close to going OUT
-        willOpenThisTurn = (hand && hand.length <= 6) || (Math.random() < 0.25);
+        // Only open from DECK when it meaningfully advances the win (keeps the table guessing).
+        // If we can lay essentially everything (0-1 card left), then open and play.
+        if (allScore >= 40 && remainingCount <= 1) {
+          chosen = allMelds; // go for the finish; otherwise keep hidden.
+        } else {
+          chosen = []; // hold melds in hand
+        }
       }
     }
+  } else {
+    // Already opened - existing strategic reveal logic uses this.
+    chosen = chooseOpeningMeldsForSeat(seat, { requiredCardId: requiredCardId });
 
-    if (willOpenThisTurn) {
-      // Play opening melds ONE CARD AT A TIME
-      const openingScore = await botPlayChosenMeldsSequentially(seat, chosen, { packCardId, packGroupId });
+    // PACK rule (even after opening): if we drew from PACK, the PACK card must be
+    // melded into a brand-new meld immediately. Keep it to just that meld.
+    if (drawSource === 'pack' && requiredCardId && chosen && chosen.length) {
+      chosen = [chosen[0]];
+    }
+  }
 
-      if (openingScore >= 40) {
-        gameState.opened[seat] = true;
-      } else {
-        // Safety: if something went wrong, keep state consistent
-        // (Should not occur for PACK draws because they are only chosen when a legal meld exists)
-      }
+  if (!gameState.opened[seat]) {
+    let openingScore = 0;
+
+    if (chosen && chosen.length) {
+      const seatSets = gameState.sets[seat];
+      const usedIds = new Set();
+      chosen.forEach(cand => {
+        cand.group.forEach(card => usedIds.add(card.id));
+      });
+
+      const remaining = [];
+      hand.forEach(c => {
+        if (!usedIds.has(c.id)) remaining.push(c);
+      });
+      gameState.hands[seat] = remaining;
+
+      chosen.forEach(cand => {
+        const gid = nextGroupId();
+        
+        // Assign Joker representations BEFORE adding to sets (so sorting works correctly)
+        cand.group.forEach(card => {
+          if (card.rank === 'JOKER' && !card.jokerRepRank) {
+            assignJokerRepresentation(card, cand.group);
+          }
+        });
+        
+        cand.group.forEach(card => {
+          card.groupId = gid;
+          seatSets.push(card);
+        });
+        // Normalise order for this meld.
+        autoSortGroupIfComplete(seatSets, gid);
+        
+        openingScore += cand.score;
+      });
+    }
+
+    if (openingScore >= 40) {
+      gameState.opened[seat] = true;
+    } else if (chosen && chosen.length) {
+      const backCards = [];
+      chosen.forEach(cand => {
+        cand.group.forEach(card => backCards.push(card));
+      });
+      gameState.sets[seat] = gameState.sets[seat].filter(c => !backCards.includes(c));
+      gameState.hands[seat] = gameState.hands[seat].concat(backCards);
+      gameState.hands[seat].sort((a, b) => {
+        const ra = ACE_HIGH_ORDER.indexOf(a.rank);
+        const rb = ACE_HIGH_ORDER.indexOf(b.rank);
+        return ra - rb;
+      });
     }
   } else {
     // Already opened - use strategic decision to reveal melds
     if (chosen && chosen.length) {
-      const totalMeldScore = chosen.reduce((sum, cand) => sum + (cand.score || 0), 0);
+      const mustPlayPackMeld = (drawSource === 'pack' && requiredCardId);
+      // Calculate total score of melds we could play
+      const totalMeldScore = chosen.reduce((sum, cand) => sum + cand.score, 0);
+      
+      // Strategic decision: should we reveal melds now or hold them?
+      if (mustPlayPackMeld || shouldBotRevealMelds(seat, chosen, totalMeldScore)) {
+        const seatSets = gameState.sets[seat];
+        const usedIds = new Set();
+        chosen.forEach(cand => {
+          cand.group.forEach(card => usedIds.add(card.id));
+        });
 
-      // If we drew from PACK, we must reveal the meld that uses the pack card.
-      // Otherwise, decide strategically.
-      if (drawSource === 'pack' || shouldBotRevealMelds(seat, chosen, totalMeldScore)) {
-        await botPlayChosenMeldsSequentially(seat, chosen, { packCardId, packGroupId });
+        const remaining = [];
+        hand.forEach(c => {
+          if (!usedIds.has(c.id)) remaining.push(c);
+        });
+        gameState.hands[seat] = remaining;
+
+        chosen.forEach(cand => {
+          const gid = nextGroupId();
+          
+          // Assign Joker representations BEFORE adding to sets (so sorting works correctly)
+          cand.group.forEach(card => {
+            if (card.rank === 'JOKER' && !card.jokerRepRank) {
+              assignJokerRepresentation(card, cand.group);
+            }
+          });
+          
+          cand.group.forEach(card => {
+            card.groupId = gid;
+            seatSets.push(card);
+          });
+          autoSortGroupIfComplete(seatSets, gid);
+        });
       }
     }
   }
 
-  // Small pause before goers/discard so humans can follow
-  await botStepPause(450);
   // Extend own melds with goers (only if opened, enforced inside)
   botAddGoersForSeat(seat);
 
   // Check if bot has no cards left BEFORE trying to discard (won by laying all cards)
   if (gameState.hands[seat].length === 0) {
+    // Clear staged Joker swaps on successful win
+    clearStagedJokerSwaps();
     // Bot laid down all their cards - they win!
     setStatus('A bot has gone OUT by laying all cards! Hand finished.');
     gameState.turnSeat = null;
@@ -6968,6 +7157,26 @@ async function botProcessAndDiscard(seat, drawSource) {
     renderRightSetRow();
     showVictoryScreen(seat);
     return;
+  }
+
+  // Joker swap rule applies to bots too, but ONLY during an OUT attempt.
+  // If a swap cannot enable going OUT this turn, it must not be taken.
+  if (botTryGoOutWithJokerSwap(seat)) {
+    // Re-render so the player can see what just happened
+    renderBottomSetRow();
+    renderTopSetRow();
+    renderLeftSetRow();
+    renderRightSetRow();
+    renderMiniHands();
+
+    // If the bot managed to lay everything (rare), it wins immediately.
+    if ((gameState.hands[seat] || []).length === 0) {
+      clearStagedJokerSwaps();
+      setStatus('A bot has gone OUT by Joker swapping and laying all cards! Hand finished.');
+      gameState.turnSeat = null;
+      showVictoryScreen(seat);
+      return;
+    }
   }
 
   // Choose a card to discard - NEVER discard jokers unless it's the only option
@@ -7054,6 +7263,8 @@ async function botProcessAndDiscard(seat, drawSource) {
       }
 
       if (gameState.hands[seat].length === 0) {
+        // Clear staged Joker swaps on successful win
+        clearStagedJokerSwaps();
         setStatus('A bot has gone OUT. Hand finished.');
         gameState.turnSeat = null;
         showVictoryScreen(seat);
@@ -7251,192 +7462,6 @@ function animateBotDraw(seat, source, onComplete) {
   // Pass null for card since bots' cards are hidden (shows card back)
   animateDrawCore(source, seat, null, onComplete);
 }
-// ================= BOT STEP-BY-STEP PLAY ANIMATIONS =================
-
-// Cache rendered card dimensions so animations stay aligned with CSS sizing
-let _cachedCardDims = null;
-function getRenderedCardDims() {
-  if (_cachedCardDims) return _cachedCardDims;
-
-  const probe = document.createElement('div');
-  probe.className = 'drawing-card';
-  probe.style.visibility = 'hidden';
-  probe.style.position = 'absolute';
-  probe.style.left = '-9999px';
-  probe.style.top = '-9999px';
-  document.body.appendChild(probe);
-
-  _cachedCardDims = {
-    w: probe.offsetWidth || 100,
-    h: probe.offsetHeight || 150
-  };
-
-  probe.remove();
-  return _cachedCardDims;
-}
-
-function getSeatSetRowEl(seat) {
-  const id = seat === 'bottom' ? 'set-bottom' :
-             seat === 'top' ? 'set-top' :
-             seat === 'left' ? 'set-left' :
-             seat === 'right' ? 'set-right' : null;
-  return id ? document.getElementById(id) : null;
-}
-
-function getBotHandAnchorEl(seat) {
-  // In demo mode, bottom is also a bot and has a full hand row
-  if (seat === 'bottom' && demoMode) {
-    return document.getElementById('hand-bottom');
-  }
-  return seat === 'bottom' ? document.getElementById('hand-bottom') : document.getElementById(`mini-${seat}`);
-}
-
-function renderSeatSetRowBySeat(seat) {
-  if (seat === 'bottom') renderBottomSetRow();
-  else if (seat === 'top') renderTopSetRow();
-  else if (seat === 'left') renderLeftSetRow();
-  else if (seat === 'right') renderRightSetRow();
-}
-
-function animateFlyCardBetweenElements(startEl, endEl, cardImage, onComplete) {
-  if (!startEl || !endEl) {
-    if (onComplete) onComplete();
-    return;
-  }
-
-  const dims = getRenderedCardDims();
-  const s = startEl.getBoundingClientRect();
-  const e = endEl.getBoundingClientRect();
-
-  const startX = s.left + (s.width / 2) - (dims.w / 2);
-  const startY = s.top + (s.height / 2) - (dims.h / 2);
-  const endX = e.left + (e.width / 2) - (dims.w / 2);
-  const endY = e.top + (e.height / 2) - (dims.h / 2);
-
-  const flyingCard = document.createElement('div');
-  flyingCard.className = 'drawing-card';
-  if (cardImage) {
-    flyingCard.style.backgroundImage = `url("${cardImage}")`;
-  }
-  flyingCard.style.left = startX + 'px';
-  flyingCard.style.top = startY + 'px';
-
-  document.body.appendChild(flyingCard);
-  flyingCard.offsetHeight;
-
-  requestAnimationFrame(() => {
-    flyingCard.style.left = endX + 'px';
-    flyingCard.style.top = endY + 'px';
-  });
-
-  setTimeout(() => {
-    flyingCard.remove();
-    if (onComplete) onComplete();
-  }, getAnimDuration(BASE_ANIM.draw));
-}
-
-function animateBotPackToSet(seat, card, onComplete) {
-  const startEl = document.getElementById('packArea');
-  const endEl = getSeatSetRowEl(seat);
-  const cardImage = (card && card.imageKey) ? `cards/${card.imageKey}.png` : 'cards/BACK_JAMAICA.png';
-  animateFlyCardBetweenElements(startEl, endEl, cardImage, onComplete);
-}
-
-function animateBotHandCardToSet(seat, card, onComplete) {
-  const startEl = getBotHandAnchorEl(seat);
-  const endEl = getSeatSetRowEl(seat);
-  const cardImage = (card && card.imageKey) ? `cards/${card.imageKey}.png` : 'cards/BACK_JAMAICA.png';
-  animateFlyCardBetweenElements(startEl, endEl, cardImage, onComplete);
-}
-
-function botStepPause(baseMs) {
-  return new Promise(resolve => setTimeout(resolve, getAnimDuration(baseMs)));
-}
-
-// Moves ONE card from bot hand into the bot's setbox with animation, then renders.
-function botMoveOneCardToSetWithAnimation(seat, cardId, groupId) {
-  return new Promise(resolve => {
-    const hand = gameState.hands[seat];
-    if (!hand || !hand.length) {
-      resolve();
-      return;
-    }
-
-    const idx = hand.findIndex(c => c.id === cardId);
-    if (idx === -1) {
-      resolve();
-      return;
-    }
-
-    const card = hand[idx];
-
-    animateBotHandCardToSet(seat, card, () => {
-      // Move from hand to sets after the card lands
-      const [moved] = hand.splice(idx, 1);
-      moved.laidTurn = gameState.currentTurnId || 0;
-      moved.groupId = groupId;
-      gameState.sets[seat].push(moved);
-
-      // Render updates so humans can follow
-      if (demoMode && seat === 'bottom') {
-        renderBottomHand();
-      }
-      renderMiniHands();
-      renderSeatSetRowBySeat(seat);
-
-      resolve();
-    });
-  });
-}
-
-// Plays chosen melds ONE CARD AT A TIME so humans can follow bot actions.
-// Supports the PACK rule where the pack card is already placed in the setbox.
-async function botPlayChosenMeldsSequentially(seat, chosen, opts = {}) {
-  if (!chosen || !chosen.length) return 0;
-
-  const packCardId = opts.packCardId || null;
-  const packGroupId = opts.packGroupId || null;
-
-  let totalScore = 0;
-
-  for (const cand of chosen) {
-    if (!cand || !cand.group || !cand.group.length) continue;
-
-    totalScore += (cand.score || 0);
-
-    const usesPack = !!(packCardId && cand.group.some(c => c && c.id === packCardId));
-    const gid = usesPack && packGroupId ? packGroupId : nextGroupId();
-
-    // Ensure all jokers in the group have a representation before we sort
-    cand.group.forEach(c => {
-      if (c && c.rank === 'JOKER' && !c.jokerRepRank) {
-        assignJokerRepresentation(c, cand.group);
-      }
-    });
-
-    // If this meld uses the PACK card, it should already be on the table.
-    // We only animate the remaining cards from hand.
-    const packStillInHand = !!(usesPack && packCardId && gameState.hands[seat] && gameState.hands[seat].some(hc => hc.id === packCardId));
-
-const idsToMove = cand.group
-  .filter(c => c && (!usesPack || packStillInHand || c.id !== packCardId))
-  .map(c => c.id);
-
-    for (const id of idsToMove) {
-      await botMoveOneCardToSetWithAnimation(seat, id, gid);
-      await botStepPause(350);
-    }
-
-    // Normalise order once the meld is complete
-    autoSortGroupIfComplete(gameState.sets[seat], gid);
-    renderSeatSetRowBySeat(seat);
-
-    await botStepPause(250);
-  }
-
-  return totalScore;
-}
-
 
 function drawFromDeck() {
   if (multiplayerMode) {
